@@ -1,0 +1,335 @@
+// Músicas do Palhetada: tudo original e feito na hora pelo navegador (sem arquivo de áudio).
+// Cada música tem uma "semente": a melodia sai sempre igual pra todo mundo, então
+// todos os celulares da sala tocam exatamente as mesmas notas.
+// A banda (bateria, baixo, acordes) toca sozinha; a melodia só soa quando você acerta a nota.
+
+export const MUSICAS = [
+  { id: 'laje', nome: 'Rock da Laje', emoji: '🎸', estilo: 'rock', desc: 'Rock pesado de churrasco', bpm: 128, tom: 40, semente: 7,
+    escala: [0, 3, 5, 7, 10], acordes: [[0, 'm'], [8, 'M'], [3, 'M'], [10, 'M']], cor: '#ff5f6d' },
+  { id: 'forro', nome: 'Forró Elétrico', emoji: '🪗', estilo: 'forro', desc: 'Baião com sanfona ligada na tomada', bpm: 116, tom: 43, semente: 21,
+    escala: [0, 2, 4, 5, 7, 9, 10], acordes: [[0, 'M'], [5, 'M'], [10, 'M'], [0, 'M']], cor: '#ffb800' },
+  { id: 'neon', nome: 'Balada Neon', emoji: '🌃', estilo: 'neon', desc: 'Synthpop de anos 80, sem pressa', bpm: 100, tom: 45, semente: 33,
+    escala: [0, 2, 4, 7, 9], acordes: [[0, 'M'], [9, 'm'], [5, 'M'], [7, 'M']], cor: '#3ad1ff' },
+  { id: 'padaria', nome: 'Metal de Padaria', emoji: '🤘', estilo: 'metal', desc: 'Rápido, pesado e às 6 da manhã', bpm: 152, tom: 38, semente: 66,
+    escala: [0, 2, 3, 5, 7, 8, 10], acordes: [[0, 'm'], [8, 'M'], [10, 'M'], [7, 'm']], cor: '#b46bff' },
+];
+export const musicaPorId = id => MUSICAS.find(m => m.id === id) || MUSICAS[0];
+
+// I = entrada (só banda), F = final. * = frase de energia ⚡ (acerte todas as notas dela)
+const ROTEIRO = ['I', 'A', 'B', 'A2*', 'B', 'C*', 'A2', 'B*', 'F'];
+const COMPASSOS = { I: 2, F: 2 }; // as outras frases têm 4 compassos
+export const OITAVOS = 8;          // cada compasso tem 8 "casinhas" (colcheias)
+
+function aleatorio(semente) {
+  let a = semente >>> 0;
+  return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+const escolhe = (r, l) => l[Math.floor(r() * l.length)];
+
+// ritmos de um compasso (1 = nota)
+const RITMOS = {
+  leve: ['10001000', '10100000', '10001010', '10000010', '10101000'],
+  medio: ['10101010', '10010010', '10101100', '10110010', '10011010', '11001010'],
+  denso: ['11101010', '10111010', '11011011', '10101111', '11101110', '11111010'],
+  fecha: ['10101000', '10001000', '10100000', '11001000'],
+};
+
+// a melodia de uma frase de 4 compassos: lista de { casa (0..31), grau }
+function motivo(r, m, denso, ultimoGrau = 4) {
+  const notas = [];
+  const nEsc = m.escala.length;
+  let g = ultimoGrau;
+  for (let c = 0; c < 4; c++) {
+    const rit = c === 3 ? escolhe(r, RITMOS.fecha) : escolhe(r, denso ? RITMOS.denso : (r() < 0.45 ? RITMOS.denso : r() < 0.85 ? RITMOS.medio : RITMOS.leve));
+    const [raizAc, tipo] = m.acordes[c % m.acordes.length];
+    const doAcorde = [raizAc, raizAc + (tipo === 'm' ? 3 : 4), raizAc + 7].map(x => ((x % 12) + 12) % 12);
+    for (let s = 0; s < 8; s++) {
+      if (rit[s] !== '1') continue;
+      if (s === 0 || s === 4) {
+        // tempo forte: vai pra nota do acorde mais perto
+        let melhor = g, dist = 99;
+        for (let k = Math.max(0, g - 4); k <= Math.min(nEsc * 2, g + 4); k++) {
+          const pc = (m.escala[k % nEsc] + 12) % 12;
+          if (doAcorde.includes(pc) && Math.abs(k - g) < dist + (r() < 0.3 ? 1 : 0)) { melhor = k; dist = Math.abs(k - g); }
+        }
+        g = melhor;
+      } else {
+        const passo = escolhe(r, [-2, -1, -1, 1, 1, 2, 0, 3, -3]);
+        g = Math.max(0, Math.min(nEsc * 2, g + passo));
+      }
+      notas.push({ casa: c * 8 + s, grau: g });
+    }
+  }
+  return notas;
+}
+
+// monta a música inteira: tempo de cada nota, altura, duração, frase
+export function compor(m) {
+  const r = aleatorio(m.semente * 7919 + 13);
+  const A = motivo(r, m, false);
+  const B = motivo(r, m, false, 6);
+  const C = motivo(r, m, true, 5);
+  // A2 = A com o último compasso diferente
+  const A2 = [...A.filter(n => n.casa < 24), ...motivo(r, m, false, A[A.length - 1].grau).filter(n => n.casa >= 24)];
+  const frases = { A, B, C, A2 };
+  const oitavo = 60 / m.bpm / 2;
+  const notas = [];
+  let compasso = 0, fraseN = 0;
+  const secoes = [];
+  for (const sec of ROTEIRO) {
+    const nome = sec.replace('*', ''), estrela = sec.endsWith('*');
+    const tam = COMPASSOS[nome] || 4;
+    secoes.push({ nome, compasso, tam });
+    if (frases[nome]) {
+      const lista = frases[nome];
+      lista.forEach((n, i) => {
+        const prox = i + 1 < lista.length ? lista[i + 1].casa : 32;
+        notas.push({ casa: compasso * 8 + n.casa, grau: n.grau, vaga: prox - n.casa, frase: fraseN, estrela });
+      });
+      fraseN++;
+    } else if (nome === 'F') {
+      // final: uma nota longa na tônica
+      notas.push({ casa: compasso * 8, grau: m.escala.length, vaga: 12, frase: fraseN++, estrela: false, final: true });
+    }
+    compasso += tam;
+  }
+  const midi = g => m.tom + 24 + Math.floor(g / m.escala.length) * 12 + m.escala[g % m.escala.length];
+  return {
+    oitavo, compassos: compasso, duracao: compasso * 8 * oitavo, secoes,
+    notas: notas.map(n => ({ ...n, t: n.casa * oitavo, midi: midi(n.grau) })),
+  };
+}
+
+// a "partitura" de cada dificuldade: quais notas ficam, em que trilha (0 a 3) e quanto duram
+export const DIFS = {
+  facil: { nome: 'Fácil', emoji: '🙂', janela: 1.9 },
+  medio: { nome: 'Médio', emoji: '😎', janela: 1.5 },
+  dificil: { nome: 'Difícil', emoji: '🔥', janela: 1.2 },
+};
+export function partitura(m, dif) {
+  const comp = compor(m);
+  let lista = comp.notas.filter(n => {
+    const s = n.casa % 8;
+    if (dif === 'facil') return s === 0 || s === 4 || n.final;
+    if (dif === 'medio') return s % 2 === 0 || n.final;
+    return true;
+  });
+  // recalcula o espaço até a próxima nota que sobrou
+  lista = lista.map((n, i) => ({ ...n, vaga: n.final ? 12 : Math.min(8, (lista[i + 1] ? lista[i + 1].casa : n.casa + 8) - n.casa) }));
+  // trilha: segue o desenho da melodia (sobe = vai pra direita) sem fugir muito da altura real
+  // "altura" de cada nota em quartos: assim as 4 trilhas são usadas por igual
+  const graus = lista.map(n => n.grau);
+  const absoluta = g => {
+    const menores = graus.filter(x => x < g).length, iguais = graus.filter(x => x === g).length;
+    return Math.max(0, Math.min(3, Math.floor((menores + iguais / 2) / graus.length * 4)));
+  };
+  let trilha = absoluta(lista[0].grau), ant = lista[0].grau;
+  const notas = [];
+  lista.forEach((n, i) => {
+    if (i > 0) {
+      const d = n.grau - ant;
+      if (d > 0) trilha += d > 2 ? 2 : 1; else if (d < 0) trilha -= d < -2 ? 2 : 1;
+      const alvo = absoluta(n.grau);
+      if (trilha - alvo > 1) trilha--; else if (alvo - trilha > 1) trilha++;
+      trilha = Math.max(0, Math.min(3, trilha));
+    }
+    ant = n.grau;
+    // nota longa quando sobra espaço depois dela
+    const minimo = { facil: 6, medio: 5, dificil: 4 }[dif];
+    const longa = n.vaga >= minimo ? (n.vaga - (dif === 'facil' ? 2 : 1.5)) * comp.oitavo : 0;
+    const base = { t: n.t, midi: n.midi, dur: longa, frase: n.frase, estrela: n.estrela };
+    notas.push({ ...base, trilha });
+    // difícil: acordes (dois dedos) nos tempos fortes de compasso par
+    const compasso = Math.floor(n.casa / 8);
+    if (dif === 'dificil' && n.casa % 8 === 0 && compasso % 2 === 0 && n.vaga >= 2) {
+      const outra = trilha <= 1 ? trilha + 2 : trilha - 2;
+      notas.push({ ...base, trilha: outra, midi: n.midi + 7, acorde: true });
+    }
+  });
+  notas.sort((a, b) => a.t - b.t || a.trilha - b.trilha);
+  notas.forEach((n, i) => { n.id = i; n.fim = n.t + n.dur; });
+  return { ...comp, notas };
+}
+
+// ======================= som =======================
+let ruido = null;
+function bufRuido(ac) {
+  if (ruido && ruido.sampleRate === ac.sampleRate) return ruido;
+  ruido = ac.createBuffer(1, ac.sampleRate * 1.2, ac.sampleRate);
+  const d = ruido.getChannelData(0);
+  for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  return ruido;
+}
+let curvaDist = null;
+function distorcao(k = 18) {
+  if (curvaDist) return curvaDist;
+  const n = 1024; curvaDist = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const x = i * 2 / n - 1; curvaDist[i] = Math.tanh(k * x) / Math.tanh(k); }
+  return curvaDist;
+}
+const hz = midi => 440 * Math.pow(2, (midi - 69) / 12);
+
+export class Banda {
+  constructor(ac, m, comp, t0) {
+    this.ac = ac; this.m = m; this.comp = comp; this.t0 = t0; this.casa = 0;
+    this.saida = ac.createGain(); this.saida.gain.value = 0.9;
+    // compressor pra nada estourar
+    const comp2 = ac.createDynamicsCompressor(); comp2.threshold.value = -14; comp2.ratio.value = 4;
+    this.saida.connect(comp2).connect(ac.destination);
+    this.lead = ac.createGain(); this.lead.gain.value = 1; this.lead.connect(this.saida);
+    // pula o que já passou (quem entrou atrasado começa do meio)
+    this.casa = Math.max(0, Math.floor((ac.currentTime - t0) / comp.oitavo));
+    this.timer = setInterval(() => this.agendar(), 30);
+    this.agendar();
+  }
+  parar() {
+    clearInterval(this.timer);
+    try { this.saida.gain.setTargetAtTime(0, this.ac.currentTime, 0.08); } catch {}
+    setTimeout(() => { try { this.saida.disconnect(); } catch {} }, 600);
+  }
+  agendar() {
+    const { ac, comp } = this;
+    const total = comp.compassos * 8;
+    while (this.casa < total + 1 && this.t0 + this.casa * comp.oitavo < ac.currentTime + 0.25) {
+      const t = this.t0 + this.casa * comp.oitavo;
+      if (t >= ac.currentTime - 0.01) this.tocarCasa(this.casa, t);
+      this.casa++;
+    }
+  }
+  tocarCasa(casa, t) {
+    const { m, comp } = this;
+    const s = casa % 8, compasso = Math.floor(casa / 8);
+    const sec = comp.secoes.find(x => compasso >= x.compasso && compasso < x.compasso + x.tam) || comp.secoes[comp.secoes.length - 1];
+    const ultimo = compasso >= comp.compassos;
+    if (ultimo) { if (s === 0) { this.prato(t, 2); this.bumbo(t); } return; }
+    const fim = sec.nome === 'F';
+    const ac0 = m.acordes[(compasso - (sec.nome === 'I' ? 0 : sec.compasso)) % m.acordes.length];
+    const raiz = m.tom + ac0[0];
+    // entrada: contagem nas baquetas no 1º compasso
+    if (sec.nome === 'I' && compasso === 0) { if (s % 2 === 0) this.baqueta(t, s === 0 ? 1.4 : 1); return; }
+    if (fim) {
+      if (casa === sec.compasso * 8) { this.prato(t, 2.4); this.bumbo(t); this.acorde(raiz, ac0[1], t, this.comp.oitavo * 14); this.baixo(raiz, t, this.comp.oitavo * 14); }
+      return;
+    }
+    if (s === 0 && sec.compasso === compasso && sec.nome !== 'I') this.prato(t, 1.2);
+    const E = m.estilo;
+    // bateria
+    const pad = {
+      rock: { k: '10001100', sn: '00100010', h: '11111111' },
+      forro: { k: '10010010', sn: '00000010', h: '11111111' },
+      neon: { k: '10101010', sn: '00100010', h: '01010101' },
+      metal: { k: '11111111', sn: '00100010', h: '10101010' },
+    }[E];
+    if (pad.k[s] === '1') this.bumbo(t, E === 'metal' ? 0.7 : 1);
+    if (pad.sn[s] === '1') this.caixa(t, E === 'forro' ? 0.6 : 1);
+    if (pad.h[s] === '1') this.chimbal(t, E === 'forro' ? (s % 2 ? 0.5 : 1) : (s % 2 ? 0.6 : 0.9), E === 'forro');
+    // baixo
+    const bx = { rock: '11111111', forro: '10010010', neon: '01110111', metal: '11111111' }[E];
+    if (bx[s] === '1') this.baixo(raiz + (E === 'forro' && s === 3 ? 7 : 0), t, this.comp.oitavo * (E === 'forro' ? 1.6 : 0.85));
+    // acordes
+    if (E === 'rock' || E === 'metal') { if (s === 0 || s === 4) this.acorde(raiz, '5', t, this.comp.oitavo * 3.6); }
+    else if (E === 'forro') { if (s === 2 || s === 3 || s === 6) this.acorde(raiz, ac0[1], t, this.comp.oitavo * 0.7); }
+    else if (s === 0) this.acorde(raiz, ac0[1], t, this.comp.oitavo * 7.6);
+  }
+  env(g, t, pico, ataque, dur) {
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(pico, t + ataque); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  }
+  bumbo(t, v = 1) {
+    const { ac } = this, o = ac.createOscillator(), g = ac.createGain();
+    o.frequency.setValueAtTime(150, t); o.frequency.exponentialRampToValueAtTime(42, t + 0.12);
+    this.env(g, t, 0.9 * v, 0.003, 0.22); o.connect(g).connect(this.saida); o.start(t); o.stop(t + 0.25);
+  }
+  ruido(t, dur, filtro, freq, vol, q = 0.8) {
+    const { ac } = this, s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+    s.buffer = bufRuido(ac); f.type = filtro; f.frequency.value = freq; f.Q.value = q;
+    this.env(g, t, vol, 0.002, dur); s.connect(f).connect(g).connect(this.saida); s.start(t, Math.random() * 0.5); s.stop(t + dur + 0.02);
+  }
+  caixa(t, v = 1) {
+    this.ruido(t, 0.16, 'bandpass', 1800, 0.45 * v, 0.6);
+    const { ac } = this, o = ac.createOscillator(), g = ac.createGain();
+    o.type = 'triangle'; o.frequency.setValueAtTime(230, t); o.frequency.exponentialRampToValueAtTime(160, t + 0.08);
+    this.env(g, t, 0.25 * v, 0.002, 0.1); o.connect(g).connect(this.saida); o.start(t); o.stop(t + 0.12);
+  }
+  chimbal(t, v = 1, triangulo = false) {
+    if (triangulo) { // triângulo do forró
+      const { ac } = this, o = ac.createOscillator(), g = ac.createGain();
+      o.type = 'sine'; o.frequency.value = 3200; this.env(g, t, 0.05 * v, 0.002, 0.12); o.connect(g).connect(this.saida); o.start(t); o.stop(t + 0.15);
+      return;
+    }
+    this.ruido(t, 0.045, 'highpass', 7500, 0.16 * v);
+  }
+  prato(t, dur = 1.2) { this.ruido(t, dur, 'highpass', 5200, 0.22); }
+  baqueta(t, v = 1) { this.ruido(t, 0.04, 'bandpass', 3000, 0.4 * v, 3); }
+  baixo(midi, t, dur) {
+    const { ac } = this, o = ac.createOscillator(), f = ac.createBiquadFilter(), g = ac.createGain();
+    o.type = this.m.estilo === 'neon' ? 'sawtooth' : 'triangle'; o.frequency.value = hz(midi - 12 + (this.m.estilo === 'neon' ? 12 : 0));
+    f.type = 'lowpass'; f.frequency.value = this.m.estilo === 'neon' ? 700 : 900;
+    this.env(g, t, this.m.estilo === 'neon' ? 0.22 : 0.42, 0.006, dur); o.connect(f).connect(g).connect(this.saida); o.start(t); o.stop(t + dur + 0.05);
+  }
+  acorde(raiz, tipo, t, dur) {
+    const { ac } = this, E = this.m.estilo;
+    const iv = tipo === '5' ? [0, 7, 12] : tipo === 'm' ? [0, 3, 7] : [0, 4, 7];
+    const g = ac.createGain(), f = ac.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = E === 'neon' ? 1400 : 2000;
+    let fim = g;
+    if (E === 'rock' || E === 'metal') {
+      const d = ac.createWaveShaper(); d.curve = distorcao(); g.connect(d); fim = d;
+      this.env(g, t, 0.16, 0.005, dur);
+    } else if (E === 'neon') this.env(g, t, 0.07, 0.25, dur);
+    else this.env(g, t, 0.06, 0.01, dur);
+    const pos = ac.createGain(); pos.gain.value = E === 'rock' || E === 'metal' ? 0.11 : 1;
+    fim.connect(f).connect(pos).connect(this.saida);
+    iv.forEach((x, i) => {
+      const o = ac.createOscillator();
+      o.type = E === 'neon' ? 'sawtooth' : E === 'forro' ? 'square' : 'sawtooth';
+      o.frequency.value = hz(raiz + 12 + x); o.detune.value = (i - 1) * 6;
+      o.connect(g); o.start(t); o.stop(t + dur + 0.05);
+    });
+  }
+  // a nota que VOCÊ toca. Devolve uma função pra soltar (nota longa)
+  solo(midi, dur = 0.28) {
+    const { ac } = this, t = ac.currentTime, E = this.m.estilo;
+    const g = ac.createGain(), f = ac.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = E === 'forro' ? 2400 : E === 'neon' ? 3200 : 2800; f.Q.value = 2;
+    let ent = g;
+    const oscs = [];
+    if (E === 'rock' || E === 'metal') {
+      const pre = ac.createGain(); pre.gain.value = 1; const d = ac.createWaveShaper(); d.curve = distorcao();
+      pre.connect(d).connect(g); ent = pre;
+    }
+    const tipos = E === 'forro' ? ['square', 'sawtooth'] : E === 'neon' ? ['square', 'sawtooth'] : ['sawtooth', 'sawtooth'];
+    tipos.forEach((tp, i) => {
+      const o = ac.createOscillator(); o.type = tp; o.frequency.value = hz(midi); o.detune.value = i ? 9 : -9;
+      if (E !== 'forro') { // vibrato leve nas notas longas
+        const lfo = ac.createOscillator(), lg = ac.createGain(); lfo.frequency.value = 5.5; lg.gain.value = dur > 0.4 ? 10 : 0;
+        lfo.connect(lg).connect(o.detune); lfo.start(t); oscs.push(lfo);
+      }
+      o.connect(ent); o.start(t); oscs.push(o);
+    });
+    const vol = E === 'rock' || E === 'metal' ? 0.12 : 0.1;
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(vol, t + 0.008);
+    g.gain.setTargetAtTime(vol * 0.6, t + 0.05, 0.15);
+    g.connect(f).connect(this.lead);
+    let solto = false;
+    const soltar = () => {
+      if (solto) return; solto = true;
+      const a = ac.currentTime; g.gain.cancelScheduledValues(a); g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), a); g.gain.exponentialRampToValueAtTime(0.0001, a + 0.12);
+      oscs.forEach(o => o.stop(a + 0.15));
+    };
+    if (dur <= 0.4) setTimeout(soltar, dur * 1000);
+    else setTimeout(soltar, (dur + 0.2) * 1000); // segurança
+    return soltar;
+  }
+  errou() { // corda abafada
+    const t = this.ac.currentTime;
+    this.ruido(t, 0.09, 'bandpass', 420, 0.35, 4);
+  }
+}
+
+// bipes do menu e da calibração
+export function bipe(ac, f = 880, dur = 0.06, vol = 0.15, quando = 0) {
+  const t = quando || ac.currentTime, o = ac.createOscillator(), g = ac.createGain();
+  o.type = 'triangle'; o.frequency.value = f;
+  g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g).connect(ac.destination); o.start(t); o.stop(t + dur + 0.02);
+}
