@@ -3,7 +3,7 @@
 // Multiplayer: todo mundo da sala toca a MESMA música ao mesmo tempo (horário do servidor),
 // cada um na sua dificuldade, e os pontos vão aparecendo ao vivo pros outros.
 import * as rede from './rede.js';
-import { MUSICAS, musicaPorId, DIFS, partitura, Banda, bipe } from './musica.js';
+import { MUSICAS, musicaPorId, DIFS, partitura, Banda, BandaAudio, bipe, carregarLista, carregar, carregada } from './musica.js';
 
 // a prévia (fora do site do jogo) não consegue falar com o servidor: só sozinho
 const PREVIA = !rede.LOCAL && !/(^|\.)github\.io$|^localhost$|^127\./.test(location.hostname);
@@ -79,7 +79,7 @@ function desenharMusicas(el, sel, aoEscolher, dif) {
   el.innerHTML = MUSICAS.map(m => {
     const rec = recorde(m.id, dif);
     return `<button class="musica ${m.id === sel ? 'on' : ''}" data-id="${m.id}" ${aoEscolher ? '' : 'disabled'}>
-      <span class="em" style="background:${m.cor}33">${m.emoji}</span>
+      <span class="em" style="background:${m.cor}33">${m.capa ? `<img src="${esc(m.capa)}" alt="">` : m.emoji}</span>
       <span><b>${esc(m.nome)}</b><small>${esc(m.desc)}</small></span>
       <span class="rec">${rec ? '🏆 ' + rec.toLocaleString('pt-BR') : ''}</span></button>`;
   }).join('');
@@ -106,7 +106,7 @@ function novaPartida({ musica, dif, inicioPerf, online, ids = [], rodada = 0 }) 
   const frases = {};
   p.notas.forEach(n => { if (n.estrela) { frases[n.frase] = frases[n.frase] || { total: 0, acertos: 0, falhou: false }; frases[n.frase].total++; } });
   J = {
-    m, dif, p, notas: p.notas.map(n => ({ ...n, st: 0 })), perf0: inicioPerf, banda: new Banda(ctx, m, p, t0),
+    m, dif, p, notas: p.notas.map(n => ({ ...n, st: 0 })), perf0: inicioPerf, banda: new (m.arquivo ? BandaAudio : Banda)(ctx, m, p, t0),
     janela: DIFS[dif].janela, pontos: 0, combo: 0, maxCombo: 0, acertos: 0, perfeitos: 0, erros: 0, errosSeguidos: 0,
     energia: 0, dobro: null, frases, segurando: [null, null, null, null], apertado: [0, 0, 0, 0], efeitos: [], faiscas: [],
     online, ids, rodada, fim: false, prox: 0, ultEnvio: 0, contou: -1,
@@ -347,9 +347,10 @@ function desenharJogo() {
     g.lineWidth = i === 0 || i === 4 ? 3 : 1.5; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
   }
   // linhas de tempo (cada batida)
-  const bat = J.p.oitavo * 2;
-  for (let k = Math.ceil((t - 0.3) / bat); k * bat < t + janela; k++) {
-    const z = (k * bat - t) / janela; if (z < zBaixo) continue;
+  const bat = J.p.oitavo * 2, BT = J.p.batidas;
+  const k0 = BT ? Math.max(0, bisseca(BT, t - 0.3)) : Math.ceil((t - 0.3) / bat);
+  for (let k = k0; BT ? (k < BT.length && BT[k] < t + janela) : k * bat < t + janela; k++) {
+    const z = ((BT ? BT[k] : k * bat) - t) / janela; if (z < zBaixo) continue;
     const a = ponto(G, -0.5, z), b = ponto(G, 3.5, z);
     g.strokeStyle = k % 4 === 0 ? 'rgba(255,255,255,.35)' : 'rgba(255,255,255,.12)'; g.lineWidth = (k % 4 === 0 ? 3 : 1.5) * a.s;
     g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
@@ -424,6 +425,7 @@ function desenharJogo() {
   g.fillStyle = J.m.cor; g.fillRect(0, H - 4, W * prog, 4);
 }
 
+function bisseca(a, x) { let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < x) lo = m + 1; else hi = m; } return lo; }
 function joia(x, y, r, tr, tipo) {
   g.save(); g.translate(x, y); g.scale(1, 0.62);
   const cor = tipo === 'erro' ? '#777' : CORES[tr], esc2 = tipo === 'erro' ? '#444' : ESCURAS[tr];
@@ -529,9 +531,17 @@ function desenharFim() {
 }
 
 // ======================= sozinho =======================
-function comecarSolo() {
+async function prepararMusica(id) {
+  const m = musicaPorId(id);
+  if (carregada(m)) return true;
+  toast('Carregando a música… 🎧', 20000);
+  try { await carregar(audio(), m); $('toast').hidden = true; return true; }
+  catch (e) { toast('Não consegui carregar a música 😕', 3000); return false; }
+}
+async function comecarSolo() {
   M.code = null;
-  novaPartida({ musica: escolha.musica, dif: escolha.dif, inicioPerf: performance.now() + 1200, online: false });
+  if (!(await prepararMusica(escolha.musica))) return;
+  novaPartida({ musica: escolha.musica, dif: escolha.dif, inicioPerf: performance.now() + 1500, online: false });
 }
 
 // ======================= salas =======================
@@ -592,7 +602,7 @@ function atualizouSala() {
   if (meta.status === 'playing' && meta.rodada !== M.rodadaVista) {
     M.rodadaVista = meta.rodada;
     if ((meta.ids || []).includes(rede.meuId())) {
-      novaPartida({ musica: meta.musica, dif: escolha.dif, inicioPerf: performance.now() + (meta.inicio - rede.agora()), online: true, ids: meta.ids, rodada: meta.rodada });
+      prepararMusica(meta.musica).then(ok => { if (ok && M.code) novaPartida({ musica: meta.musica, dif: escolha.dif, inicioPerf: performance.now() + (meta.inicio - rede.agora()), online: true, ids: meta.ids, rodada: meta.rodada }); });
       return;
     }
   }
@@ -606,6 +616,7 @@ function desenharSala() {
   $('listaJog').innerHTML = lista.map(([id, p]) => `<div class="jog"><div class="av">${bonecoSVG(p.look, 44) || '🙂'}</div>${esc(p.name)}<small>${DIFS[p.dif] ? DIFS[p.dif].emoji + ' ' + DIFS[p.dif].nome : ''}${id === (M.meta && M.meta.host) ? '<br>👑 anfitrião' : ''}</small></div>`).join('')
     + (lista.length < 2 ? '<p class="peq">Mande o convite pra alguém entrar 👆</p>' : '');
   const musica = (M.meta && M.meta.musica) || 'laje';
+  if (!carregada(musicaPorId(musica))) carregar(audio(), musicaPorId(musica)).catch(() => {});
   $('quemEscolhe').textContent = M.host ? '(você escolhe)' : '(quem criou escolhe)';
   desenharMusicas($('listaMusicasSala'), musica, M.host ? id => rede.atualizarMeta(M.code, { musica: id }).catch(() => {}) : null, escolha.dif);
   desenharDifs($('difSala'), escolha.dif, id => { escolha.dif = id; guardar('ph-escolha', escolha); rede.atualizarEu(M.code, { dif: id }).catch(() => {}); desenharSala(); });
@@ -706,6 +717,7 @@ async function iniciar() {
   } catch (e) { console.warn('Sem conexão com o servidor', e); }
   $('linkPortal').hidden = PREVIA; $('notaPrevia').hidden = !PREVIA;
   desenharEu();
+  await carregarLista();
   const sala = PARAMS.get('sala');
   if (sala) { $('codigo').value = sala.toUpperCase(); entrar(sala); }
 }

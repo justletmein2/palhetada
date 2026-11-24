@@ -15,6 +15,37 @@ export const MUSICAS = [
 ];
 export const musicaPorId = id => MUSICAS.find(m => m.id === id) || MUSICAS[0];
 
+// ---------- músicas de arquivo (custom songs convertidas) ----------
+// Ficam FORA do repositório público. A lista vem de musicas/lista.json (só na prévia de teste)
+// e, mais pra frente, da parte trancada por senha do Firebase.
+const cache = {};
+export async function carregarLista(base = 'musicas/') {
+  try {
+    const r = await fetch(base + 'lista.json', { cache: 'no-cache' });
+    if (!r.ok) return [];
+    const lista = await r.json();
+    for (const m of lista) {
+      if (MUSICAS.some(x => x.id === m.id)) continue;
+      MUSICAS.push({ ...m, estilo: 'audio', capa: m.capa ? base + m.capa : null, arquivo: { mapa: base + m.mapa, audio: base + m.audio } });
+    }
+    return lista;
+  } catch { return []; }
+}
+export const carregada = m => !m.arquivo || !!(cache[m.id] && cache[m.id].buffer);
+export function carregar(ac, m) {
+  if (!m.arquivo) return Promise.resolve();
+  if (!cache[m.id]) cache[m.id] = (async () => {
+    const [mapa, bytes] = await Promise.all([
+      fetch(m.arquivo.mapa).then(r => { if (!r.ok) throw new Error('mapa'); return r.json(); }),
+      fetch(m.arquivo.audio).then(r => { if (!r.ok) throw new Error('áudio'); return r.arrayBuffer(); }),
+    ]);
+    const buffer = await new Promise((ok, erro) => ac.decodeAudioData(bytes, ok, erro));
+    cache[m.id] = { mapa, buffer };
+    return cache[m.id];
+  })().catch(e => { delete cache[m.id]; throw e; });
+  return Promise.resolve(cache[m.id]);
+}
+
 // I = entrada (só banda), F = final. * = frase de energia ⚡ (acerte todas as notas dela)
 const ROTEIRO = ['I', 'A', 'B', 'A2*', 'B', 'C*', 'A2', 'B*', 'F'];
 const COMPASSOS = { I: 2, F: 2 }; // as outras frases têm 4 compassos
@@ -107,6 +138,12 @@ export const DIFS = {
   dificil: { nome: 'Difícil', emoji: '🔥', janela: 1.2 },
 };
 export function partitura(m, dif) {
+  if (m.arquivo) {
+    const { mapa } = cache[m.id];
+    const notas = mapa.notas[dif].map((n, i) => ({ ...n, id: i, midi: 0, fim: n.t + n.dur }));
+    const bat = mapa.batidas;
+    return { oitavo: (bat[1] - bat[0]) / 2, duracao: mapa.duracao, batidas: bat, notas };
+  }
   const comp = compor(m);
   let lista = comp.notas.filter(n => {
     const s = n.casa % 8;
@@ -323,6 +360,28 @@ export class Banda {
   errou() { // corda abafada
     const t = this.ac.currentTime;
     this.ruido(t, 0.09, 'bandpass', 420, 0.35, 4);
+  }
+}
+
+// banda de "arquivo": a música inteira já gravada (custom song). Só toca o áudio no horário certo.
+export class BandaAudio {
+  constructor(ac, m, comp, t0) {
+    this.ac = ac;
+    this.saida = ac.createGain(); this.saida.gain.value = 1; this.saida.connect(ac.destination);
+    this.fonte = ac.createBufferSource(); this.fonte.buffer = cache[m.id].buffer; this.fonte.connect(this.saida);
+    const agora = ac.currentTime;
+    // quem entrou atrasado começa do meio da música
+    if (t0 >= agora) this.fonte.start(t0); else this.fonte.start(agora, agora - t0);
+  }
+  parar() {
+    try { this.saida.gain.setTargetAtTime(0, this.ac.currentTime, 0.1); this.fonte.stop(this.ac.currentTime + 0.6); } catch {}
+  }
+  solo() { return () => {}; } // a guitarra já está na gravação
+  errou() {
+    const ac = this.ac, t = ac.currentTime, s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+    s.buffer = bufRuido(ac); f.type = 'bandpass'; f.frequency.value = 420; f.Q.value = 4;
+    g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    s.connect(f).connect(g).connect(ac.destination); s.start(t); s.stop(t + 0.1);
   }
 }
 
