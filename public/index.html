@@ -7,6 +7,9 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <title>Palhetada</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Nunito:wght@700;800;900&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -16,13 +19,11 @@
   <!-- painel durante a partida -->
   <div id="hud" hidden>
     <div id="hudEsq">
-      <div id="pontos">0</div>
-      <div id="mult">x1</div>
-      <div id="energia"><i></i></div>
+      <div id="placar"><div id="mult">x1</div><div><div id="pontos">0</div><div id="energia"><i></i></div></div></div>
       <button id="btnSairJogo" aria-label="Sair da partida">✕ sair</button>
     </div>
     <div id="rivais"></div>
-    <div id="boneco"><div class="av"></div><div class="balao" hidden></div></div>
+    <div id="boneco"><div class="balao" hidden></div></div>
     <button id="btnEnergia" hidden>⚡ SOLTA O SOM!</button>
     <div id="aviso" hidden></div>
   </div>
