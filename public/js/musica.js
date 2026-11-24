@@ -32,10 +32,12 @@ export async function carregarLista(base = 'musicas/') {
   } catch { return []; }
 }
 export const carregada = m => !m.arquivo || !!(cache[m.id] && cache[m.id].buffer);
-export function carregar(ac, m) {
+export function carregar(ac, m, aoAvancar) {
   if (!m.arquivo) return Promise.resolve();
   if (!cache[m.id]) cache[m.id] = (async () => {
-    const [mapa, bytes] = await Promise.all([
+    let mapa, bytes;
+    if (m.arquivo.extra) ({ mapa, bytes } = await (await import('./extras.js')).obter(m, aoAvancar));   // trancada pela senha (Firebase)
+    else [mapa, bytes] = await Promise.all([
       fetch(m.arquivo.mapa).then(r => { if (!r.ok) throw new Error('mapa'); return r.json(); }),
       fetch(m.arquivo.audio).then(r => { if (!r.ok) throw new Error('áudio'); return r.arrayBuffer(); }),
     ]);

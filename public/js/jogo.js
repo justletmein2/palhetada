@@ -4,6 +4,7 @@
 // cada um na sua dificuldade, e os pontos vão aparecendo ao vivo pros outros.
 import * as rede from './rede.js';
 import { MUSICAS, musicaPorId, DIFS, partitura, Banda, BandaAudio, bipe, carregarLista, carregar, carregada } from './musica.js';
+import * as extras from './extras.js';
 
 // a prévia (fora do site do jogo) não consegue falar com o servidor: só sozinho
 const PREVIA = !rede.LOCAL && !/(^|\.)github\.io$|^localhost$|^127\./.test(location.hostname);
@@ -30,7 +31,7 @@ if (!DIFS[escolha.dif]) escolha.dif = 'medio';
 let atrasoMs = guardado('ph-atraso', 0);
 
 function mostrar(id) {
-  ['telaInicio', 'telaMusicas', 'telaComo', 'telaAtraso', 'telaSala', 'telaFim'].forEach(t => { $(t).hidden = t !== id; });
+  ['telaInicio', 'telaMusicas', 'telaComo', 'telaAtraso', 'telaSala', 'telaFim', 'telaExtras'].forEach(t => { $(t).hidden = t !== id; });
   $('hud').hidden = id !== null;
 }
 let toastT = 0;
@@ -153,7 +154,10 @@ function acertar(n, d) {
   J.pontos += q[1] * mult() * (dobrado() ? 2 : 1);
   const som = J.banda.solo(n.midi, n.dur > 0 ? n.dur + 0.15 : 0.3);
   if (n.dur > 0) { n.st = 3; n.ate = n.t; J.segurando[n.trilha] = { n, som }; } else n.st = 1;
-  J.efeitos.push({ tr: n.trilha, txt: q[0], cor: d <= PERFEITO ? '#fff36b' : '#fff', ini: performance.now() });
+  // acorde: um texto só (senão os dois "PERFEITO!" se encavalam)
+  const ultimoTxt = J.efeitos.filter(e => e.txt).pop();
+  const repetido = ultimoTxt && performance.now() - ultimoTxt.ini < 60;
+  J.efeitos.push({ tr: n.trilha, txt: repetido ? '' : q[0], cor: d <= PERFEITO ? '#fff36b' : '#fff', ini: performance.now() });
   for (let i = 0; i < 10; i++) J.faiscas.push({ tr: n.trilha, a: Math.random() * Math.PI, v: 120 + Math.random() * 220, ini: performance.now(), cor: n.estrela ? '#bff6ff' : CORES[n.trilha] });
   if (n.estrela) {
     const f = J.frases[n.frase]; f.acertos++;
@@ -578,6 +582,7 @@ function desenharJogo() {
       g.globalAlpha = 1 - k / 0.45; g.strokeStyle = e.cor; g.lineWidth = 4 * (1 - k);
       g.save(); g.translate(p.x, p.y); g.scale(1, 0.58); g.beginPath(); g.arc(0, 0, rAlvo * (1 + k * 1.6), 0, 7); g.stroke(); g.restore();
     }
+    if (!e.txt) continue;
     const y = p.y - 44 - k * 34, tam = e.txt === 'PERFEITO!' ? 19 : 17;
     g.globalAlpha = Math.min(1, (1 - k) * 2);
     g.font = `900 ${tam * (k < 0.12 ? 1 + (0.12 - k) * 3 : 1)}px ${FONTE}`;
@@ -718,11 +723,17 @@ function desenharFim() {
 
 // ======================= sozinho =======================
 async function prepararMusica(id) {
+  if (!MUSICAS.some(x => x.id === id)) {   // música extra e este celular ainda não tem a senha
+    await extras.atualizar().catch(() => {});
+    if (!MUSICAS.some(x => x.id === id)) { toast('Essa é uma música extra: digite a senha 🔒', 3500); abrirExtras(); return false; }
+  }
   const m = musicaPorId(id);
   if (carregada(m)) return true;
-  toast('Carregando a música… 🎧', 20000);
-  try { await carregar(audio(), m); $('toast').hidden = true; return true; }
-  catch (e) { toast('Não consegui carregar a música 😕', 3000); return false; }
+  toast(m.extra ? 'Baixando a música… 🎧' : 'Carregando a música… 🎧', 60000);
+  try {
+    await carregar(audio(), m, f => toast(`Baixando a música… ${Math.round(f * 100)}% 🎧`, 60000));
+    $('toast').hidden = true; return true;
+  } catch (e) { console.warn(e); toast('Não consegui carregar a música 😕', 3000); return false; }
 }
 async function comecarSolo() {
   M.code = null;
@@ -802,9 +813,11 @@ function desenharSala() {
   $('listaJog').innerHTML = lista.map(([id, p]) => `<div class="jog"><div class="av">${bonecoSVG(p.look, 44) || '🙂'}</div>${esc(p.name)}<small>${DIFS[p.dif] ? DIFS[p.dif].emoji + ' ' + DIFS[p.dif].nome : ''}${id === (M.meta && M.meta.host) ? '<br>👑 anfitrião' : ''}</small></div>`).join('')
     + (lista.length < 2 ? '<p class="peq">Mande o convite pra alguém entrar 👆</p>' : '');
   const musica = (M.meta && M.meta.musica) || 'laje';
-  if (!carregada(musicaPorId(musica))) carregar(audio(), musicaPorId(musica)).catch(() => {});
+  const conheco = MUSICAS.some(x => x.id === musica);
+  if (conheco && !carregada(musicaPorId(musica))) carregar(audio(), musicaPorId(musica)).catch(() => {});   // já vai baixando
   $('quemEscolhe').textContent = M.host ? '(você escolhe)' : '(quem criou escolhe)';
   desenharMusicas($('listaMusicasSala'), musica, M.host ? id => rede.atualizarMeta(M.code, { musica: id }).catch(() => {}) : null, escolha.dif);
+  if (!conheco) $('listaMusicasSala').insertAdjacentHTML('afterbegin', '<button class="musica on" disabled><span class="em">🔒</span><span><b>Música extra</b><small>Toque em "Músicas extras" e digite a senha</small></span></button>');
   desenharDifs($('difSala'), escolha.dif, id => { escolha.dif = id; guardar('ph-escolha', escolha); rede.atualizarEu(M.code, { dif: id }).catch(() => {}); desenharSala(); });
   $('btnComecar').hidden = !M.host;
   $('salaEspera').hidden = M.host;
@@ -827,6 +840,49 @@ async function ganharXP(n) {
     setTimeout(() => toast(`+${n} XP pro seu boneco ⭐`), 1500);
   } catch {}
 }
+
+// ======================= músicas extras (senha) =======================
+let voltarDeExtras = 'telaInicio';
+function desenharExtras() {
+  $('extrasTrancado').hidden = extras.liberadas; $('extrasAberto').hidden = !extras.liberadas;
+  const n = MUSICAS.filter(m => m.extra).length;
+  $('extrasInfo').textContent = n ? `🔓 Liberado! ${n} ${n === 1 ? 'música extra já aparece' : 'músicas extras já aparecem'} na lista.` : '🔓 Liberado! Ainda não tem nenhuma música extra enviada.';
+}
+async function abrirExtras() {
+  if (PREVIA) { toast('Na prévia não dá: as extras ficam no servidor do jogo 🙂', 3200); return; }
+  voltarDeExtras = ['telaMusicas', 'telaSala'].find(t => !$(t).hidden) || 'telaInicio';
+  try { await rede.conectar(); await extras.atualizar(); } catch {}
+  desenharExtras(); mostrar('telaExtras');
+  if (!extras.liberadas) setTimeout(() => $('senhaExtras').focus(), 100);
+}
+function voltarExtras() {
+  if (voltarDeExtras === 'telaMusicas') telaSolo(); else if (voltarDeExtras === 'telaSala' && M.code) { mostrar('telaSala'); desenharSala(); } else mostrar('telaInicio');
+}
+document.querySelectorAll('.btnExtras').forEach(b => { b.onclick = () => abrirExtras(); });
+$('btnExtrasVoltar').onclick = () => voltarExtras();
+$('btnLiberar').onclick = async () => {
+  const senha = $('senhaExtras').value.trim();
+  if (!senha) return;
+  $('btnLiberar').disabled = true;
+  const ok = await extras.liberar(senha).catch(() => false);
+  $('btnLiberar').disabled = false;
+  if (!ok) { toast('Senha errada 🙅', 2400); return; }
+  $('senhaExtras').value = ''; toast('Liberado! 🎉', 2000); desenharExtras();
+};
+$('senhaExtras').addEventListener('keydown', e => { if (e.key === 'Enter') $('btnLiberar').click(); });
+$('btnEnviarExtras').onclick = () => $('arqExtras').click();
+$('arqExtras').onchange = async () => {
+  const arqs = [...$('arqExtras').files]; $('arqExtras').value = '';
+  let ok = 0;
+  for (const [i, a] of arqs.entries()) {
+    try {
+      const nome = await extras.enviarArquivo(a, f => toast(`Enviando ${i + 1}/${arqs.length}: ${Math.round(f * 100)}%`, 60000));
+      ok++; toast(`✅ ${nome} enviada`, 1500);
+    } catch (e) { console.warn(e); toast(`Não deu pra enviar ${a.name} 😕`, 3500); await new Promise(r => setTimeout(r, 2000)); }
+  }
+  await extras.atualizar(); desenharExtras();
+  toast(ok ? `Pronto! ${ok} música${ok > 1 ? 's' : ''} no jogo 🎸` : 'Nenhuma música enviada', 3000);
+};
 
 // ======================= ajuste de atraso =======================
 function mostrarAtraso() { $('atrasoValor').textContent = `${atrasoMs} ms`; }
@@ -932,6 +988,7 @@ async function iniciar() {
   $('linkPortal').hidden = PREVIA; $('notaPrevia').hidden = !PREVIA;
   desenharEu();
   await carregarLista();
+  if (!PREVIA) await extras.atualizar().catch(() => {});
   const sala = PARAMS.get('sala');
   if (sala) { $('codigo').value = sala.toUpperCase(); entrar(sala); }
 }

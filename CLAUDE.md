@@ -24,3 +24,16 @@
 
 - Sirva uma pasta com `palhetada/` (= public) e `forma-palavras/` lado a lado e abra
   `palhetada/index.html?local=1` em duas abas. `&robo=1` faz o jogo tocar sozinho.
+
+## Músicas extras (custom songs, trancadas por senha)
+
+- Músicas de artistas NÃO vão pro GitHub (é público). Ficam no Firebase em `palhetada/extras/` e só
+  quem digitou a senha consegue ler (`extras/vip/{uid}`). A senha real fica SÓ nas regras coladas no
+  Console do Firebase; aqui no `database.rules.json` ela aparece como `SENHA_SO_NO_CONSOLE`.
+  Ao mandar regras novas pro Lucas, troque esse texto pela senha antes (ele sabe qual é).
+- `public/js/extras.js`: lista, baixa (e guarda no celular, IndexedDB) e envia músicas.
+- Converter custom song do Clone Hero (.sng) em pacote `.palhetada.json`: desempacotar o .sng,
+  converter `notes.chart`/`notes.mid` em mapa de 4 trilhas (Difícil = Expert; Médio = Hard ou Expert
+  simplificado; Fácil = Medium ou simplificado), áudio em MP3 112k, capa 160px. O Lucas envia o pacote
+  pela tela "🔒 Músicas extras → Enviar músicas".
+- `public/musicas/` fica fora do git (só pra testes/prévia local).

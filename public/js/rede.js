@@ -142,3 +142,45 @@ export function ouvirPartida(code, cb) {
   const offs = ['estado', 'resultado'].map(k => B.on(SALAS + code + '/' + k, v => { st[k] = v || {}; cb(st, k); }));
   return () => offs.forEach(f => f && f());
 }
+
+// ---------- músicas extras (custom songs), trancadas pela senha ----------
+// palhetada/extras/vip/{uid}   a senha digitada (o Firebase só aceita a certa; ela fica só nas regras do Console)
+// palhetada/extras/lista/{id}  nome, artista, capa, quantas partes tem o áudio
+// palhetada/extras/mapa/{id}   o mapa de notas (texto JSON)
+// palhetada/extras/audio/{id}/{n}  o áudio em pedaços (base64)
+const EXTRAS = 'palhetada/extras/';
+export async function liberarExtras(senha) {
+  try { await B.set(EXTRAS + 'vip/' + uid, senha); return true; } catch { return false; }
+}
+export async function extrasLiberadas() {
+  try { return !!(await B.get(EXTRAS + 'vip/' + uid)); } catch { return false; }
+}
+export async function listaExtras() {
+  try { return (await B.get(EXTRAS + 'lista')) || {}; } catch { return null; }
+}
+export async function baixarExtra(id, partes, aoAvancar) {
+  const pedacos = new Array(partes); let feitos = 0;
+  const fila = [...Array(partes).keys()];
+  const trabalhar = async () => {
+    while (fila.length) {
+      const k = fila.shift();
+      pedacos[k] = await B.get(`${EXTRAS}audio/${id}/${k}`);
+      if (typeof pedacos[k] !== 'string') throw new Error('pedaço ' + k + ' faltando');
+      aoAvancar && aoAvancar(++feitos / partes);
+    }
+  };
+  const [mapa] = await Promise.all([B.get(EXTRAS + 'mapa/' + id), trabalhar(), trabalhar(), trabalhar()]);
+  return { mapa: JSON.parse(mapa), base64: pedacos.join('') };
+}
+export async function enviarExtra(pac, aoAvancar) {
+  const TAM = 600000, partes = Math.ceil(pac.audio.length / TAM);
+  for (let k = 0; k < partes; k++) {
+    await B.set(`${EXTRAS}audio/${pac.id}/${k}`, pac.audio.slice(k * TAM, (k + 1) * TAM));
+    aoAvancar && aoAvancar((k + 1) / (partes + 1));
+  }
+  await B.set(EXTRAS + 'mapa/' + pac.id, JSON.stringify(pac.mapa));
+  // a lista por último: assim a música só aparece pros outros quando chegou inteira
+  await B.set(EXTRAS + 'lista/' + pac.id, { nome: pac.nome, artista: pac.artista, cor: pac.cor || '#ff5f6d', duracao: pac.duracao || 0,
+    capa: pac.capa || '', partes, mime: pac.mime || 'audio/mpeg', enviada: agora() });
+  aoAvancar && aoAvancar(1);
+}

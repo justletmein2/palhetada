@@ -61,6 +61,7 @@
     <div class="caixa">
       <h2>Escolha a música</h2>
       <div id="listaMusicasSolo" class="musicas"></div>
+      <button class="btnExtras sec" type="button">🔒 Músicas extras</button>
       <div class="rot2">DIFICULDADE</div>
       <div id="difSolo" class="difs"></div>
       <button id="btnTocarSolo" class="grande verde">▶ Tocar</button>
@@ -104,11 +105,32 @@
       <div id="listaJog" class="lista"></div>
       <div class="rot2">MÚSICA <small id="quemEscolhe"></small></div>
       <div id="listaMusicasSala" class="musicas"></div>
+      <button class="btnExtras sec" type="button">🔒 Músicas extras</button>
       <div class="rot2">SUA DIFICULDADE</div>
       <div id="difSala" class="difs"></div>
       <button id="btnComecar" class="grande" hidden>▶ Começar</button>
       <p id="salaEspera" class="peq" hidden>Esperando quem criou a sala começar…</p>
       <button id="btnSairSala" class="link">Sair da sala</button>
+    </div>
+  </section>
+
+  <!-- MÚSICAS EXTRAS -->
+  <section id="telaExtras" class="tela" hidden>
+    <div class="caixa">
+      <h2>🔒 Músicas extras</h2>
+      <div id="extrasTrancado">
+        <p>Músicas de verdade, só pra quem sabe a senha.</p>
+        <input id="senhaExtras" type="password" placeholder="Senha" autocomplete="off" autocapitalize="off">
+        <button id="btnLiberar" class="grande" type="button">Liberar</button>
+        <p class="peq">Cada celular digita uma vez só.</p>
+      </div>
+      <div id="extrasAberto" hidden>
+        <p id="extrasInfo"></p>
+        <button id="btnEnviarExtras" class="sec" type="button">⬆️ Enviar músicas</button>
+        <input id="arqExtras" type="file" accept=".json,application/json" multiple hidden>
+        <p class="peq">Pra mandar uma música nova: escolha o arquivo <b>.palhetada.json</b> dela. Pode escolher vários de uma vez.</p>
+      </div>
+      <button id="btnExtrasVoltar" class="link" type="button">Voltar</button>
     </div>
   </section>
 
