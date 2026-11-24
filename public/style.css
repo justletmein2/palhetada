@@ -144,3 +144,8 @@ input { font: inherit; font-size: 17px; padding: 11px; border-radius: 12px; bord
 [data-tema="escuro"] .meu b { color: #c9b8ff; }
 [data-tema="escuro"] .jog.vence { background: #6b5a14; }
 [data-tema="escuro"] .musica.on, [data-tema="escuro"] .difs button.on { background: #4a1f4f; color: #fff; }
+
+/* boneco do jogador: toca pra personalizar (tela compartilhada com todos os jogos) */
+.menu .eu { cursor: pointer; }
+.menu .eu:active { transform: translateY(2px); }
+#btnBoneco { background: rgba(255,255,255,.92); box-shadow: 0 4px 0 rgba(0,0,0,.3); }
