@@ -149,3 +149,15 @@ input { font: inherit; font-size: 17px; padding: 11px; border-radius: 12px; bord
 .menu .eu { cursor: pointer; }
 .menu .eu:active { transform: translateY(2px); }
 #btnBoneco { background: rgba(255,255,255,.92); box-shadow: 0 4px 0 rgba(0,0,0,.3); }
+
+/* título: as letras quicam no ritmo e acendem nas cores das trilhas (fonte Righteous) */
+h1.titulo-ritmo { font-family: Righteous, Nunito, sans-serif; font-weight: 400; font-size: min(48px, 11.5vw); letter-spacing: 1px; transform: none;
+  color: #fff; text-shadow: 0 5px 0 rgba(0,0,0,.3); display: flex; justify-content: center; }
+h1.titulo-ritmo span { display: inline-block; color: #fff; text-shadow: 0 5px 0 rgba(0,0,0,.3); animation: notaTitulo 1.88s cubic-bezier(.3,1.6,.5,1) infinite; animation-delay: calc(var(--i) * .235s); }
+h1.titulo-ritmo span:nth-child(4n+1) { --c: #2fdc6b; } h1.titulo-ritmo span:nth-child(4n+2) { --c: #ff4d5e; }
+h1.titulo-ritmo span:nth-child(4n+3) { --c: #ffd23f; } h1.titulo-ritmo span:nth-child(4n+4) { --c: #3aa0ff; }
+@keyframes notaTitulo { 0%, 100% { transform: translateY(0) scale(1); color: #fff; text-shadow: 0 5px 0 rgba(0,0,0,.3); }
+  8% { transform: translateY(-12px) scale(1.18); color: var(--c); text-shadow: 0 0 16px var(--c), 0 5px 0 rgba(0,0,0,.3); }
+  22% { transform: translateY(0) scale(1); color: var(--c); text-shadow: 0 0 8px var(--c), 0 5px 0 rgba(0,0,0,.3); }
+  40% { color: #fff; text-shadow: 0 5px 0 rgba(0,0,0,.3); } }
+@media (prefers-reduced-motion: reduce) { h1.titulo-ritmo span { animation: none; } }
