@@ -109,7 +109,7 @@ def montar(ev, g16, dif, eh_acorde):
         m = min(cand, key=lambda x: abs(x - t)) if cand else t
         if abs(m - t) < 0.045: t = m
         dur = e['dur']
-        longa = dur >= 0.42
+        longa = dur >= 0.42 and e.get('segura', True)
         n = dict(t=round(float(t), 3), trilha=tr, dur=round(float(dur - 0.1), 3) if longa else 0.0, forca=e['forca'], p=e['p'])
         if eh_acorde(e):
             # acorde: forma de 2 notas; mesmo acorde repetido = mesma forma
@@ -200,3 +200,41 @@ def afinar(notas, gap):
         if np.any(usados & (np.abs(ts - ts[k]) < gap - 1e-6)): continue
         usados[k] = True
     return [n for t in ts[usados] for n in grupos[t]]
+
+def palhetadas(y, delta=0.18):
+    """os ataques da palheta: subida rápida de energia nos agudos"""
+    S = np.abs(librosa.stft(y, n_fft=1024, hop_length=HOP))
+    f = librosa.fft_frequencies(sr=SR, n_fft=1024)
+    hf = librosa.power_to_db(S[(f > 1500) & (f < 9000)] ** 2 + 1e-10)
+    flux = np.maximum(0, np.diff(hf, axis=1, prepend=hf[:, :1])).mean(0)
+    ref = nd.maximum_filter1d(nd.uniform_filter1d(flux, 15), int(3 * FPS)) + np.percentile(flux, 60)
+    env = flux / ref
+    pk = librosa.util.peak_pick(env, pre_max=3, post_max=3, pre_avg=8, post_avg=4, delta=delta, wait=int(0.07 * FPS))
+    return pk, env
+
+def segmentar_palhetadas(A, y, delta=0.18):
+    """uma nota por palhetada (só onde a guitarra está soando); dura até a próxima palhetada ou o silêncio"""
+    pk, env = palhetadas(y, delta)
+    n, ativo, pm = A['n'], A['ativo'], A['pm']
+    pk = [p for p in pk if p < n and ativo[min(n - 1, p + 2)]]
+    ev = []
+    for k, a in enumerate(pk):
+        lim = pk[k + 1] if k + 1 < len(pk) else n
+        b = a
+        while b < lim and ativo[b]: b += 1
+        e = dict(ini=a, fim=b)
+        c0, c1 = a + 2, min(b, a + int(0.15 * FPS))
+        w = pm[c0:c1]; w = w[~np.isnan(w)]
+        if not len(w):
+            w = pm[a:b]; w = w[~np.isnan(w)]
+        e['p'] = float(np.median(w)) if len(w) else np.nan
+        e['voz'] = float(np.mean(A['vprob'][a:max(a + 1, c1)]))
+        c = A['C'][:, a:max(a + 1, c1)].mean(1); c = c / (c.max() + 1e-9)
+        e['poli'] = int(np.sum(c > 0.65)); e['croma'] = int(np.argmax(c))
+        e['forca'] = float(env[max(0, a - 1): a + 2].max())
+        # nota longa só se o som continua firme (não caiu muito) até o fim
+        meio = min(b - 1, a + int(0.35 * FPS))
+        e['segura'] = bool(b > a and A['db'][meio] > A['db'][a:a + 4].max() - 10)
+        e['t'] = a / FPS; e['dur'] = (b - a) / FPS
+        ev.append(e)
+    return ev

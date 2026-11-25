@@ -186,8 +186,9 @@ function notasBateria(m, comp, sec, dif, frase) {
       const prato = x === 0 && (c - sec.compasso) % 4 === 0;
       if (prato) aqui.push(3);
       if (pad.sn[x] === '1') aqui.push(1);
-      if (pad.k[x] === '1' && (dif === 'dificil' || (dif === 'medio' ? x % 2 === 0 : x % 4 === 0))) aqui.push(0);
-      if (pad.h[x] === '1' && !prato && (dif === 'dificil' || (dif === 'medio' && x % 2 === 0))) aqui.push(2);
+      // metade das notas de antes (o Lucas achou a bateria difícil demais)
+      if (pad.k[x] === '1' && (dif === 'dificil' ? x % 2 === 0 : dif === 'medio' ? x % 4 === 0 : x === 0)) aqui.push(0);
+      if (pad.h[x] === '1' && !prato && dif === 'dificil' && x % 4 === 2) aqui.push(2);
       let fica = [...new Set(aqui)];
       if (dif === 'facil') fica = fica.slice(0, 1);       // fácil: uma peça por vez
       else fica = fica.slice(0, 2);                      // nunca mais que dois dedos

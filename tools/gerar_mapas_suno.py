@@ -260,6 +260,16 @@ def montar_bateria(D, beats, dif, denso):
             if len(mesmos) >= {'facil': 1, 'medio': 2, 'dificil': 2 if denso <= 1 else 3}[dif]: continue
             out.append(n)
         notas = sorted(out, key=lambda n: (n['t'], n['trilha']))
+    # o Lucas achou a bateria difícil demais: fica só metade das notas (as mais importantes)
+    peso_peca = {'prato': 3.0, 'caixa': 2.4, 'bumbo': 2.2, 'tom1': 2.0, 'tom2': 2.0, 'chimbal': 1.0}
+    def peso(n):
+        nob = np.min(np.abs(beats - n['t'])) < 0.04
+        no8 = np.min(np.abs(g8 - n['t'])) < 0.04
+        return peso_peca[n['peca']] + (2 if nob else 1 if no8 else 0)
+    if notas:
+        corte = sorted((peso(n) for n in notas), reverse=True)[len(notas) // 2]
+        notas = [n for n in notas if peso(n) > corte] + [n for n in notas if peso(n) == corte][:max(0, len(notas) // 2 - sum(1 for n in notas if peso(n) > corte))]
+        notas.sort(key=lambda n: (n['t'], n['trilha']))
     return notas
 
 # ---------------- sabre (caixinhas) ----------------
@@ -346,7 +356,9 @@ def main(sid, so_mapa=False):
     if os.path.exists(cachep): A, E = pickle.load(open(cachep, 'rb'))
     else:
         yg = load(S['fonte']) if S.get('fonte') else gu
-        A = guit.analisar(yg); E = guit.segmentar(A); pickle.dump((A, E), open(cachep, 'wb'))
+        A = guit.analisar(yg); pickle.dump((A, None), open(cachep, 'wb'))
+    yg = load(S['fonte']) if S.get('fonte') else gu
+    E = guit.segmentar_palhetadas(A, yg, S.get('deltaP', 0.18))
     g16 = grade(beats, 4); g8 = grade(beats, 2)
     fcorte = np.percentile([e['forca'] for e in E], S['acordeForca']) if S.get('acordeForca') else 1e9
     gd = guit.finalizar(guit.afinar(guit.montar(E, g16, 'dificil', lambda e: (e['poli'] >= S.get('poliAcorde', 3) and e['voz'] < 0.3) or e['forca'] >= fcorte), S.get('gapG', 0.1)))
