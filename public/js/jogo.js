@@ -703,7 +703,7 @@ function desenharJogo() {
       const P = geoKit()[e.kit], k = (agora - e.ini) / 650;
       if (k < 0.45) anelPeca(P, 1 + k * 0.8, COR_KIT[e.kit], 1 - k / 0.45, 5 * (1 - k));
       if (!e.txt) continue;
-      const y = (P.tipo === 'bumbo' ? P.y - P.ry : P.y - P.ry - 22) - k * 30;
+      const y = (P.tipo === 'bumbo' ? P.y - P.ry - 26 : P.y - P.ry - 26) - k * 30;
       g.globalAlpha = Math.min(1, (1 - k) * 2); g.font = `900 17px ${FONTE}`; g.textAlign = 'center';
       g.lineWidth = 5; g.strokeStyle = 'rgba(10,4,30,.75)'; g.strokeText(e.txt, P.x, y); g.fillStyle = e.cor; g.fillText(e.txt, P.x, y);
       g.globalAlpha = 1; continue;
@@ -748,92 +748,137 @@ function desenharJogo() {
 const KIT = ['pratoE', 'caixa', 'tom1', 'tom2', 'pratoD', 'bumbo'];
 const PECA_KIT = { chimbal: 'pratoE', prato: 'pratoD', bumbo: 'bumbo', caixa: 'caixa', tom1: 'tom1', tom2: 'tom2' };
 const COR_KIT = { pratoE: '#ffd23f', caixa: '#ff4d5e', tom1: '#2fdc6b', tom2: '#3aa0ff', pratoD: '#ff9a3d', bumbo: '#c38bff' };
-const TECLA_KIT = { pratoE: 'S', caixa: 'D', tom1: 'F', tom2: 'J', pratoD: 'K', bumbo: '␣' };
+const TECLA_KIT = { pratoE: 'S', caixa: 'D', tom1: 'F', tom2: 'J', pratoD: 'K', bumbo: 'espaço' };
 const TECLAS_KIT = { s: 'pratoE', a: 'pratoE', d: 'caixa', f: 'tom1', j: 'tom2', k: 'pratoD', l: 'pratoD', ' ': 'bumbo', b: 'bumbo' };
 function geoKit() {
-  const u = Math.min(W * 0.86, H * 0.5);
-  const cx = W / 2, base = H * 0.8;
-  return {
-    bumbo: { x: cx, y: base - u * 0.02, rx: u * 0.17, ry: u * 0.17, tipo: 'bumbo' },
-    caixa: { x: cx - u * 0.33, y: base - u * 0.16, rx: u * 0.15, ry: u * 0.065, tipo: 'tambor', alt: u * 0.08 },
-    tom1: { x: cx - u * 0.14, y: base - u * 0.34, rx: u * 0.11, ry: u * 0.05, tipo: 'tambor', alt: u * 0.07 },
-    tom2: { x: cx + u * 0.14, y: base - u * 0.34, rx: u * 0.12, ry: u * 0.055, tipo: 'tambor', alt: u * 0.075 },
-    pratoE: { x: cx - u * 0.38, y: base - u * 0.55, rx: u * 0.15, ry: u * 0.04, tipo: 'prato' },
-    pratoD: { x: cx + u * 0.38, y: base - u * 0.55, rx: u * 0.16, ry: u * 0.043, tipo: 'prato' },
-    chao: base + u * 0.2, u,
+  // 5 colunas (prato E, caixa, tom 1, tom 2, prato D) + bumbo embaixo, no meio
+  const u = Math.min(W * 0.92, H * 0.55);
+  const cx = W / 2, base = H * 0.84;
+  const col = k => cx + (k - 2) * u * 0.2;
+  const K = {
+    pratoE: { x: col(0), y: base - u * 0.62, rx: u * 0.1, ry: u * 0.028, tipo: 'prato' },
+    caixa: { x: col(1), y: base - u * 0.3, rx: u * 0.085, ry: u * 0.038, tipo: 'tambor', alt: u * 0.06 },
+    tom1: { x: col(2), y: base - u * 0.44, rx: u * 0.075, ry: u * 0.034, tipo: 'tambor', alt: u * 0.055 },
+    tom2: { x: col(3), y: base - u * 0.4, rx: u * 0.08, ry: u * 0.036, tipo: 'tambor', alt: u * 0.06 },
+    pratoD: { x: col(4), y: base - u * 0.62, rx: u * 0.1, ry: u * 0.028, tipo: 'prato' },
+    bumbo: { x: cx, y: base, rx: u * 0.15, ry: u * 0.15, tipo: 'bumbo' },
+    chao: base + u * 0.17, u, topo: H * 0.33, larg: u * 0.95,
   };
+  K.bumbo.alvo = base - u * 0.15;   // a barra do bumbo "pousa" na borda de cima dele
+  for (const p of KIT) if (p !== 'bumbo') K[p].alvo = K[p].y;
+  // mesma velocidade pra todas as colunas: a distância até a peça mostra o tempo que falta
+  K.vel = (K.bumbo.alvo - K.topo) / 1.25;
+  return K;
 }
 function pecaNoPonto(x, y) {
-  const K = geoKit(); let melhor = null, dm = Infinity;
-  for (const p of KIT) {
-    const P = K[p], ry = P.tipo === 'bumbo' ? P.ry : Math.max(P.ry, P.rx * 0.45);
-    const d = Math.hypot((x - P.x) / P.rx, (y - P.y) / ry);
-    if (d < dm) { dm = d; melhor = p; }
-  }
-  return dm < 2.2 ? melhor : null;
+  const K = geoKit();
+  if (y > K.bumbo.alvo - K.u * 0.02) return 'bumbo';   // faixa de baixo inteira = bumbo
+  let melhor = null, dm = Infinity;
+  for (const p of KIT) { if (p === 'bumbo') continue; const d = Math.abs(x - K[p].x); if (d < dm) { dm = d; melhor = p; } }
+  return melhor;
 }
-function desenharPeca(P, nome, aceso) {
+function desenharPeca(P, nome, aceso, K) {
   const cor = COR_KIT[nome];
   g.save();
+  if (aceso) { g.shadowColor = cor; g.shadowBlur = 30; }
   if (P.tipo === 'prato') {
-    g.strokeStyle = '#8a8aa0'; g.lineWidth = 3;   // pedestal
-    g.beginPath(); g.moveTo(P.x, P.y); g.lineTo(P.x, geoKit().chao - 10); g.stroke();
-    g.beginPath(); g.moveTo(P.x - 16, geoKit().chao); g.lineTo(P.x, geoKit().chao - 14); g.lineTo(P.x + 16, geoKit().chao); g.stroke();
+    g.save(); g.shadowBlur = 0; g.strokeStyle = '#8a8aa0'; g.lineWidth = 3;   // pedestal
+    g.beginPath(); g.moveTo(P.x, P.y); g.lineTo(P.x, K.chao - 10); g.stroke();
+    g.beginPath(); g.moveTo(P.x - 14, K.chao); g.lineTo(P.x, K.chao - 12); g.lineTo(P.x + 14, K.chao); g.stroke(); g.restore();
     const lg = g.createLinearGradient(P.x - P.rx, 0, P.x + P.rx, 0);
-    lg.addColorStop(0, '#9b7a1e'); lg.addColorStop(0.45, aceso ? '#fff7c2' : '#ffd96a'); lg.addColorStop(1, '#a57d16');
+    lg.addColorStop(0, '#9b7a1e'); lg.addColorStop(0.45, aceso ? '#fffbe0' : '#ffd96a'); lg.addColorStop(1, '#a57d16');
     g.fillStyle = lg; g.beginPath(); g.ellipse(P.x, P.y, P.rx, P.ry, 0, 0, 7); g.fill();
-    g.strokeStyle = 'rgba(80,50,0,.5)'; g.lineWidth = 1;
+    g.shadowBlur = 0; g.strokeStyle = 'rgba(80,50,0,.5)'; g.lineWidth = 1;
     for (const k of [0.35, 0.7]) { g.beginPath(); g.ellipse(P.x, P.y, P.rx * k, P.ry * k, 0, 0, 7); g.stroke(); }
-    g.fillStyle = '#5a4210'; g.beginPath(); g.ellipse(P.x, P.y, 4, 2, 0, 0, 7); g.fill();
   } else if (P.tipo === 'tambor') {
-    // corpo
     g.fillStyle = cor; g.beginPath();
     g.moveTo(P.x - P.rx, P.y); g.lineTo(P.x - P.rx, P.y + P.alt); g.ellipse(P.x, P.y + P.alt, P.rx, P.ry, 0, Math.PI, 0, true); g.lineTo(P.x + P.rx, P.y); g.closePath(); g.fill();
-    g.fillStyle = 'rgba(0,0,0,.28)'; g.fillRect(P.x - P.rx, P.y + P.alt * 0.15, P.rx * 2, P.alt * 0.12);
-    g.fillStyle = 'rgba(255,255,255,.18)'; g.fillRect(P.x - P.rx * 0.8, P.y, P.rx * 0.22, P.alt);
-    // pele
-    g.fillStyle = aceso ? '#ffffff' : '#ece7f6'; g.strokeStyle = '#c9c4d6'; g.lineWidth = 3;
+    g.shadowBlur = 0;
+    g.fillStyle = 'rgba(255,255,255,.2)'; g.fillRect(P.x - P.rx * 0.8, P.y, P.rx * 0.22, P.alt);
+    g.fillStyle = aceso ? '#ffffff' : '#ece7f6'; g.strokeStyle = cor; g.lineWidth = 3;
     g.beginPath(); g.ellipse(P.x, P.y, P.rx, P.ry, 0, 0, 7); g.fill(); g.stroke();
   } else {   // bumbo, visto de frente
     g.fillStyle = '#1c1238'; g.beginPath(); g.arc(P.x, P.y, P.rx * 1.06, 0, 7); g.fill();
     g.fillStyle = cor; g.beginPath(); g.arc(P.x, P.y, P.rx, 0, 7); g.fill();
-    const rg = g.createRadialGradient(P.x - P.rx * 0.3, P.y - P.rx * 0.3, 0, P.x, P.y, P.rx * 0.86);
-    rg.addColorStop(0, aceso ? '#ffffff' : '#f6f2ff'); rg.addColorStop(1, aceso ? '#f1e6ff' : '#d8d0ea');
-    g.fillStyle = rg; g.beginPath(); g.arc(P.x, P.y, P.rx * 0.86, 0, 7); g.fill();
-    g.fillStyle = cor; g.font = `900 ${Math.round(P.rx * 0.32)}px ${FONTE}`; g.textAlign = 'center'; g.textBaseline = 'middle';
-    g.globalAlpha *= 0.55; g.fillText('♪', P.x, P.y + 2); g.textBaseline = 'alphabetic';
+    g.shadowBlur = 0;
+    g.fillStyle = aceso ? '#ffffff' : '#e6def5'; g.beginPath(); g.arc(P.x, P.y, P.rx * 0.84, 0, 7); g.fill();
   }
   g.restore();
 }
-function anelPeca(P, k, cor, alfa, largura) {   // k = 1 no momento de bater
-  g.save(); g.globalAlpha = alfa; g.strokeStyle = cor; g.lineWidth = largura;
-  g.shadowColor = cor; g.shadowBlur = 10;
-  const ry = P.tipo === 'bumbo' ? P.ry : P.ry;
-  g.beginPath(); g.ellipse(P.x, P.y, P.rx * k + 4, ry * k + 4, 0, 0, 7); g.stroke(); g.restore();
+function anelPeca(P, k, cor, alfa, largura) {   // efeito de acerto
+  g.save(); g.globalAlpha = alfa; g.strokeStyle = cor; g.lineWidth = largura; g.shadowColor = cor; g.shadowBlur = 10;
+  g.beginPath(); g.ellipse(P.x, P.y, P.rx * k + 4, P.ry * k + 4, 0, 0, 7); g.stroke(); g.restore();
 }
+// as notas da bateria CAEM em linha reta até a peça: bata quando a bolinha encostar nela.
+// O bumbo é uma barra roxa atravessando a tela inteira, que pousa em cima do bumbo.
 function desenharKit(t, janela, peso, agora) {
   if (peso < 0.02) return;
-  const K = geoKit();
+  const K = geoKit(), v = K.vel;
   g.save(); g.globalAlpha = peso;
-  // tapetinho
-  g.fillStyle = 'rgba(10,4,30,.45)'; g.beginPath(); g.ellipse(W / 2, K.chao, K.u * 0.62, K.u * 0.09, 0, 0, 7); g.fill();
-  const ordem = ['pratoE', 'pratoD', 'bumbo', 'tom1', 'tom2', 'caixa'];
-  for (const p of ordem) desenharPeca(K[p], p, agora - (J.batida[p] || 0) < 110);
-  // anéis das notas chegando
-  const ap = janela * 0.85;
+  // trilhas verticais de cada peça, com o "alvo" brilhando onde a bolinha tem que encostar
+  for (const p of KIT) {
+    if (p === 'bumbo') continue;
+    const P = K[p], lg = g.createLinearGradient(0, K.topo, 0, P.alvo);
+    lg.addColorStop(0, COR_KIT[p] + '00'); lg.addColorStop(1, COR_KIT[p] + '40');
+    g.fillStyle = lg; g.fillRect(P.x - 14, K.topo, 28, P.alvo - K.topo);
+  }
+  g.fillStyle = 'rgba(10,4,30,.45)'; g.beginPath(); g.ellipse(W / 2, K.chao, K.u * 0.55, K.u * 0.07, 0, 0, 7); g.fill();
+  // linha do bumbo
+  g.save(); g.strokeStyle = COR_KIT.bumbo; g.globalAlpha = peso * 0.5; g.lineWidth = 3; g.setLineDash([8, 8]);
+  g.beginPath(); g.moveTo(W / 2 - K.larg / 2, K.bumbo.alvo); g.lineTo(W / 2 + K.larg / 2, K.bumbo.alvo); g.stroke(); g.restore();
+  const vis = [], proxima = {};
   for (let i = Math.max(0, J.prox - 6); i < J.notas.length; i++) {
-    const n = J.notas[i]; if (n.t - t > ap) break;
+    const n = J.notas[i]; if (n.t - t > 2.2) break;
     if (n.instr !== 'bateria' || n.st === 1) continue;
-    const p = PECA_KIT[n.peca] || 'caixa', P = K[p], f = (n.t - t) / ap;   // 1 longe, 0 na hora
-    if (f < -0.12) continue;
-    if (n.st === 2) { anelPeca(P, 1, '#888', 0.5 * peso, 3); continue; }
-    const k = 1 + Math.max(0, f) * (P.tipo === 'bumbo' ? 0.75 : 1.0);
-    anelPeca(P, k, COR_KIT[p], peso * Math.min(1, (1 - f) * 2.5), f < 0.08 ? 6 : 4);
+    vis.push(n);
+    const p = PECA_KIT[n.peca] || 'caixa';
+    if (n.st === 0 && proxima[p] == null) proxima[p] = n.t - t;
+  }
+  // barras do bumbo: finas, atrás de tudo
+  for (const n of vis) {
+    if ((PECA_KIT[n.peca] || 'caixa') !== 'bumbo') continue;
+    const y = K.bumbo.alvo - (n.t - t) * v;
+    if (y < K.topo - 10 || (n.st === 2 && t - n.t > 0.3)) continue;
+    g.save(); g.globalAlpha = peso * (n.st === 2 ? 0.3 : 0.75) * Math.min(1, (y - K.topo) / 50 + 0.2);
+    g.fillStyle = n.st === 2 ? '#8a8a96' : COR_KIT.bumbo;
+    g.beginPath(); g.roundRect(W / 2 - K.larg / 2, y - 4, K.larg, 8, 4); g.fill(); g.restore();
+  }
+  const ordem = ['pratoE', 'pratoD', 'bumbo', 'tom1', 'tom2', 'caixa'];
+  for (const p of ordem) {
+    desenharPeca(K[p], p, agora - (J.batida[p] || 0) < 120, K);
+    // a peça acende quando a nota dela está chegando: bateu no brilho máximo = na hora certa
+    const dt = proxima[p];
+    if (dt != null && dt < 0.4 && dt > -0.1) {
+      const f = 1 - Math.abs(dt) / 0.4;
+      anelPeca(K[p], 1.05 + (1 - f) * 0.25, '#ffffff', peso * f, 2 + f * 4);
+    }
+  }
+  // as bolinhas caindo
+  for (const n of vis) {
+    if ((PECA_KIT[n.peca] || 'caixa') === 'bumbo') continue;
+    const p = PECA_KIT[n.peca] || 'caixa', P = K[p];
+    const y = P.alvo - (n.t - t) * v;
+    if (y < K.topo - 20) continue;
+    const surge = Math.min(1, (y - K.topo) / 50 + 0.2);
+    const perto = Math.abs(n.t - t) < 0.08 && n.st === 0;
+    if (n.st === 2) {   // passou: some caindo, cinza
+      if (t - n.t > 0.35) continue;
+    }
+    const cor = n.st === 2 ? '#8a8a96' : COR_KIT[p];
+    g.save(); g.globalAlpha = peso * surge * (n.st === 2 ? 0.5 : 1);
+    if (perto) { g.shadowColor = '#fff'; g.shadowBlur = 24; }
+    {
+      const r = K.u * 0.045;
+      g.fillStyle = cor; g.beginPath(); g.arc(P.x, y, r, 0, 7); g.fill();
+      g.lineWidth = 3; g.strokeStyle = '#fff'; g.stroke();
+      g.fillStyle = 'rgba(255,255,255,.7)'; g.beginPath(); g.arc(P.x - r * 0.3, y - r * 0.3, r * 0.3, 0, 7); g.fill();
+    }
+    g.restore();
   }
   if (COMPUTADOR) {
     g.font = `900 13px ${FONTE}`; g.textAlign = 'center';
-    for (const p of KIT) { const P = K[p], y = P.tipo === 'bumbo' ? P.y + P.ry + 18 : P.y - P.ry - 10;
-      g.fillStyle = 'rgba(10,4,30,.7)'; g.beginPath(); g.roundRect(P.x - 12, y - 14, 24, 19, 5); g.fill();
+    for (const p of KIT) { const P = K[p], y = p === 'bumbo' ? P.y + 6 : P.y + (P.alt || 0) + P.ry + 22;
+      const lw = p === 'bumbo' ? 56 : 26; g.fillStyle = 'rgba(10,4,30,.7)'; g.beginPath(); g.roundRect(P.x - lw / 2, y - 14, lw, 19, 5); g.fill();
       g.fillStyle = COR_KIT[p]; g.fillText(TECLA_KIT[p], P.x, y); }
   }
   g.restore();
@@ -858,19 +903,34 @@ const modoBateria = () => J && pesosInstr(tempo()).w.bateria > 0.5;
 // ---------- caixinhas do sabre ----------
 const COR_SABRE = ['#ff4d5e', '#3aa0ff'], ESC_SABRE = ['#a3182a', '#1452a0'];
 const SETA = { cima: -Math.PI / 2, baixo: Math.PI / 2, esq: Math.PI, dir: 0 };
-const alvoSabre = lado => ({ x: W * (lado ? 0.73 : 0.27), y: H * 0.64, s: Math.min(W * 0.3, H * 0.17) });
+const alvoSabre = lado => ({ x: W * (lado ? 0.74 : 0.26), y: H * 0.66, s: Math.min(W * 0.38, H * 0.21) });
 function caixinha(x, y, tam, lado, dir, alfa, cinza) {
-  g.save(); g.translate(x, y); g.globalAlpha = alfa;
-  const r = tam * 0.18;
-  g.fillStyle = 'rgba(0,0,0,.35)'; g.beginPath(); g.roundRect(-tam / 2 + tam * 0.05, -tam / 2 + tam * 0.08, tam, tam, r); g.fill();
-  const lg = g.createLinearGradient(0, -tam / 2, 0, tam / 2);
-  lg.addColorStop(0, cinza ? '#9a9aa6' : COR_SABRE[lado]); lg.addColorStop(1, cinza ? '#55555f' : ESC_SABRE[lado]);
-  g.fillStyle = lg; g.beginPath(); g.roundRect(-tam / 2, -tam / 2, tam, tam, r); g.fill();
-  g.strokeStyle = 'rgba(255,255,255,.55)'; g.lineWidth = Math.max(1.5, tam * 0.04); g.stroke();
-  // seta pra onde cortar
-  g.rotate(SETA[dir]); g.fillStyle = '#fff';
-  g.beginPath(); g.moveTo(tam * 0.3, 0); g.lineTo(-tam * 0.05, -tam * 0.26); g.lineTo(-tam * 0.05, -tam * 0.1); g.lineTo(-tam * 0.28, -tam * 0.1);
-  g.lineTo(-tam * 0.28, tam * 0.1); g.lineTo(-tam * 0.05, tam * 0.1); g.lineTo(-tam * 0.05, tam * 0.26); g.closePath(); g.fill();
+  g.save(); g.globalAlpha = alfa;
+  const h = tam / 2;
+  // é um cubo: dá pra ver o lado que fica virado pro fundo (pra onde a caixinha vem)
+  const dx = W / 2 - x, dy = H * 0.2 - y, d = Math.hypot(dx, dy) || 1, prof = tam * 0.32;
+  const ox = dx / d * prof, oy = dy / d * prof;
+  const F = [[x - h, y - h], [x + h, y - h], [x + h, y + h], [x - h, y + h]];
+  const B = F.map(([a, b]) => [a + ox, b + oy]);
+  const base = cinza ? ['#77777f', '#5c5c66', '#4a4a52'] : lado ? ['#5aa8ff', '#1e5fb0', '#174a8a'] : ['#ff6b78', '#b8222f', '#8e1a25'];
+  // faces de lado (só as que aparecem; a da frente cobre o resto)
+  for (let i = 0; i < 4; i++) {
+    const j = (i + 1) % 4;
+    const nx = (F[j][1] - F[i][1]), ny = -(F[j][0] - F[i][0]);   // normal da aresta
+    if (nx * ox + ny * oy < 0) continue;
+    g.fillStyle = i === 0 ? base[0] : base[2];
+    g.beginPath(); g.moveTo(...F[i]); g.lineTo(...F[j]); g.lineTo(...B[j]); g.lineTo(...B[i]); g.closePath(); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.25)'; g.lineWidth = 1; g.stroke();
+  }
+  // a frente
+  const lg = g.createLinearGradient(0, y - h, 0, y + h);
+  lg.addColorStop(0, base[0]); lg.addColorStop(1, base[1]);
+  g.fillStyle = lg; g.beginPath(); g.roundRect(x - h, y - h, tam, tam, tam * 0.08); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,.6)'; g.lineWidth = Math.max(1.5, tam * 0.035); g.stroke();
+  // a seta: um triângulo branco que ocupa a metade da caixinha pra onde é o corte
+  g.translate(x, y); g.rotate(SETA[dir]);
+  g.fillStyle = '#fff'; g.shadowColor = 'rgba(255,255,255,.6)'; g.shadowBlur = tam * 0.08;
+  g.beginPath(); g.moveTo(tam * 0.06, -h * 0.82); g.lineTo(tam * 0.06, h * 0.82); g.lineTo(h * 0.88, 0); g.closePath(); g.fill();
   g.restore();
 }
 function desenharSabre(t, janela, peso, agora) {
