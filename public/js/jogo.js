@@ -132,7 +132,7 @@ function novaPartida({ musica, dif, inicioPerf, online, ids = [], rodada = 0, in
     m, dif, p, notas: p.notas.map(n => ({ ...n, st: 0 })), perf0: inicioPerf, banda: new (m.arquivo ? (m.arquivo.pasta ? BandaFaixas : BandaAudio) : Banda)(ctx, m, p, t0),
     janela: DIFS[dif].janela, pontos: 0, combo: 0, maxCombo: 0, acertos: 0, perfeitos: 0, erros: 0, errosSeguidos: 0,
     energia: 0, dobro: null, frases, segurando: [null, null, null, null], apertado: [0, 0, 0, 0], efeitos: [], faiscas: [],
-    online, ids, rodada, fim: false, prox: 0, ultEnvio: 0, contou: -1, avisoTroca: 0,
+    online, ids, rodada, fim: false, prox: 0, ultEnvio: 0, contou: -1, avisoTroca: 0, batida: {},
   };
   fase = 'jogo'; mostrar(null);
   prepararDancarino();
@@ -184,7 +184,7 @@ function cortar(lado, dir, ts = performance.now()) {
   if (!alvo) return;   // cortar o vento não tira ponto
   if (alvo.dir !== dir) {   // lado certo, direção errada
     errarNota(alvo);
-    J.efeitos.push({ sabre: true, lado, errado: true, txt: 'DIREÇÃO!', cor: '#ff8a8a', ini: performance.now() });
+    J.efeitos.push({ sabre: true, lado, errado: true, txt: COMPUTADOR ? 'DIREÇÃO!' : '✗', cor: '#ff8a8a', ini: performance.now() });
     return;
   }
   acertar(alvo, Math.max(0, Math.abs(alvo.t - t) - 0.04));
@@ -203,9 +203,14 @@ function acertar(n, d) {
   // acorde: um texto só (senão os dois "PERFEITO!" se encavalam)
   const ultimoTxt = J.efeitos.filter(e => e.txt).pop();
   const repetido = ultimoTxt && performance.now() - ultimoTxt.ini < 60;
-  if (n.instr === 'sabre') {
+  if (n.instr === 'bateria') {
+    const pk = PECA_KIT[n.peca] || 'caixa', P = geoKit()[pk];
+    J.batida[pk] = performance.now();
+    J.efeitos.push({ kit: pk, txt: repetido ? '' : q[0], cor: d <= PERFEITO ? '#fff36b' : '#fff', ini: performance.now() });
+    for (let i = 0; i < 10; i++) J.faiscas.push({ palco: true, x: P.x, y: P.y, a: Math.random() * Math.PI, v: 120 + Math.random() * 200, ini: performance.now(), cor: n.estrela ? '#bff6ff' : COR_KIT[pk] });
+  } else if (n.instr === 'sabre') {
     const p = alvoSabre(n.lado);
-    J.efeitos.push({ sabre: true, lado: n.lado, dir: n.dir, txt: repetido ? '' : q[0], cor: d <= PERFEITO ? '#fff36b' : '#fff', ini: performance.now() });
+    J.efeitos.push({ sabre: true, lado: n.lado, dir: n.dir, txt: repetido || !COMPUTADOR ? '' : q[0], cor: d <= PERFEITO ? '#fff36b' : '#fff', ini: performance.now() });
     for (let i = 0; i < 14; i++) J.faiscas.push({ palco: true, x: p.x, y: p.y, a: Math.random() * Math.PI * 2, v: 120 + Math.random() * 260, ini: performance.now(), cor: n.estrela ? '#bff6ff' : COR_SABRE[n.lado] });
   } else {
     J.efeitos.push({ tr: n.trilha, txt: repetido ? '' : q[0], cor: d <= PERFEITO ? '#fff36b' : '#fff', ini: performance.now() });
@@ -295,7 +300,7 @@ function passo() {
     if (TR[k].t - t > 1.7) break;
     if (k > 0 || TR[k].instr !== 'guitarra') {
       const I = (J.p.nomes && J.p.nomes[TR[k].instr]) || INSTRUMENTOS[TR[k].instr];
-      aviso(TR[k].instr === 'sabre' ? '⚔️ CORTE AS CAIXINHAS!' : `${I.emoji} ${I.nome.toUpperCase()}!`, 1300); som1([660, 990]);
+      aviso(TR[k].instr === 'sabre' ? (COMPUTADOR ? '⚔️ CORTE AS CAIXINHAS!' : '⚔️') : `${I.emoji} ${I.nome.toUpperCase()}!`, 1300); som1([660, 990]);
     }
     J.avisoTroca = k + 1;
   }
@@ -566,12 +571,13 @@ function pesosInstr(t) {
 // ---------- a pista ----------
 function desenharJogo() {
   const t = tempo(), G = geo(), janela = J.janela, agora = performance.now();
+  g.lineJoin = 'round';   // sem 'espinhos' no contorno das letras
   const dob = dobrado(), m = mult();
   const intensidade = Math.min(1, J.combo / 40);
   fundo(t, dob, intensidade);
   desenharDancarino(t, G);
   const zBaixo = -0.13;
-  const PI = pesosInstr(t), WI = PI.w, vis = 1 - WI.sabre;
+  const PI = pesosInstr(t), WI = PI.w, vis = 1 - WI.sabre - WI.bateria;
   // corpo da pista (fica quase transparente na bateria e no teclado; some nas caixinhas do sabre)
   g.globalAlpha = (0.28 + 0.72 * WI.guitarra) * vis;
   const pts = [ponto(G, -0.5, 1), ponto(G, 3.5, 1), ponto(G, 3.5, zBaixo), ponto(G, -0.5, zBaixo)];
@@ -616,7 +622,7 @@ function desenharJogo() {
   const rAlvo = G.larg / 4 * 0.37;
   g.globalAlpha = 1;
   if (WI.teclado > 0) { g.globalAlpha = WI.teclado; desenharTeclado(G, rAlvo, zBaixo); g.globalAlpha = 1; }
-  if (WI.bateria > 0) { g.globalAlpha = WI.bateria; desenharBateria(G, rAlvo); g.globalAlpha = 1; }
+
   for (let tr = 0; tr < 4 && WI.guitarra > 0.02; tr++) {
     const p = ponto(G, tr, 0), ap = J.apertado[tr], seg = !!J.segurando[tr];
     g.globalAlpha = WI.guitarra;
@@ -651,7 +657,7 @@ function desenharJogo() {
   const visiveis = [];
   for (let i = Math.max(0, J.prox - 8); i < J.notas.length; i++) {
     const n = J.notas[i]; if (n.t - t > janela) break;
-    if (n.fim < t - 0.4) continue; if (n.instr !== 'sabre') visiveis.push(n);
+    if (n.fim < t - 0.4) continue; if (n.instr !== 'sabre' && n.instr !== 'bateria') visiveis.push(n);
   }
   for (let i = visiveis.length - 1; i >= 0; i--) {
     const n = visiveis[i];
@@ -676,6 +682,7 @@ function desenharJogo() {
     joia(p.x, p.y, r, n.trilha, n.st === 2 ? 'erro' : n.estrela ? 'estrela' : '', agora, n.instr);
     g.globalAlpha = 1;
   }
+  desenharKit(t, janela, WI.bateria, agora);
   desenharSabre(t, janela, WI.sabre, agora);
   // explosões de acerto (anel que cresce) e faíscas
   J.faiscas = J.faiscas.filter(f => agora - f.ini < 500);
@@ -692,6 +699,15 @@ function desenharJogo() {
   g.textAlign = 'center';
   for (const e of J.efeitos) {
     if (e.sabre) { efeitoSabre(e, agora); continue; }
+    if (e.kit) {
+      const P = geoKit()[e.kit], k = (agora - e.ini) / 650;
+      if (k < 0.45) anelPeca(P, 1 + k * 0.8, COR_KIT[e.kit], 1 - k / 0.45, 5 * (1 - k));
+      if (!e.txt) continue;
+      const y = (P.tipo === 'bumbo' ? P.y - P.ry : P.y - P.ry - 22) - k * 30;
+      g.globalAlpha = Math.min(1, (1 - k) * 2); g.font = `900 17px ${FONTE}`; g.textAlign = 'center';
+      g.lineWidth = 5; g.strokeStyle = 'rgba(10,4,30,.75)'; g.strokeText(e.txt, P.x, y); g.fillStyle = e.cor; g.fillText(e.txt, P.x, y);
+      g.globalAlpha = 1; continue;
+    }
     const p = ponto(G, e.tr, 0), k = (agora - e.ini) / 650;
     if (e.x) {
       g.globalAlpha = 1 - k; g.strokeStyle = '#ff4d5e'; g.lineWidth = 5; g.lineCap = 'round'; const s = 11;
@@ -712,7 +728,7 @@ function desenharJogo() {
   g.globalAlpha = 1;
   // combo
   if (J.combo >= 5) {
-    const p = ponto(G, 1.5, 0.16), quente = J.combo >= 30;
+    const p = vis > 0.5 ? ponto(G, 1.5, 0.16) : { x: W / 2, y: H * 0.37 }, quente = J.combo >= 30;
     g.font = `900 ${quente ? 30 : 24}px ${FONTE}`;
     g.lineWidth = 6; g.strokeStyle = 'rgba(10,4,30,.6)';
     const txt = J.combo + ' COMBO';
@@ -725,6 +741,119 @@ function desenharJogo() {
   g.fillStyle = 'rgba(255,255,255,.15)'; g.fillRect(0, H - 4, W, 4);
   g.fillStyle = J.m.cor; g.fillRect(0, H - 4, W * prog, 4);
 }
+
+// ---------- a bateria de verdade ----------
+// 6 peças: prato da esquerda (elevado), caixa, tom 1, tom 2, prato da direita (elevado) e o bumbo na frente.
+// Cada nota é um anel que vai encolhendo em volta da peça: bata quando o anel encostar nela.
+const KIT = ['pratoE', 'caixa', 'tom1', 'tom2', 'pratoD', 'bumbo'];
+const PECA_KIT = { chimbal: 'pratoE', prato: 'pratoD', bumbo: 'bumbo', caixa: 'caixa', tom1: 'tom1', tom2: 'tom2' };
+const COR_KIT = { pratoE: '#ffd23f', caixa: '#ff4d5e', tom1: '#2fdc6b', tom2: '#3aa0ff', pratoD: '#ff9a3d', bumbo: '#c38bff' };
+const TECLA_KIT = { pratoE: 'S', caixa: 'D', tom1: 'F', tom2: 'J', pratoD: 'K', bumbo: '␣' };
+const TECLAS_KIT = { s: 'pratoE', a: 'pratoE', d: 'caixa', f: 'tom1', j: 'tom2', k: 'pratoD', l: 'pratoD', ' ': 'bumbo', b: 'bumbo' };
+function geoKit() {
+  const u = Math.min(W * 0.86, H * 0.5);
+  const cx = W / 2, base = H * 0.8;
+  return {
+    bumbo: { x: cx, y: base - u * 0.02, rx: u * 0.17, ry: u * 0.17, tipo: 'bumbo' },
+    caixa: { x: cx - u * 0.33, y: base - u * 0.16, rx: u * 0.15, ry: u * 0.065, tipo: 'tambor', alt: u * 0.08 },
+    tom1: { x: cx - u * 0.14, y: base - u * 0.34, rx: u * 0.11, ry: u * 0.05, tipo: 'tambor', alt: u * 0.07 },
+    tom2: { x: cx + u * 0.14, y: base - u * 0.34, rx: u * 0.12, ry: u * 0.055, tipo: 'tambor', alt: u * 0.075 },
+    pratoE: { x: cx - u * 0.38, y: base - u * 0.55, rx: u * 0.15, ry: u * 0.04, tipo: 'prato' },
+    pratoD: { x: cx + u * 0.38, y: base - u * 0.55, rx: u * 0.16, ry: u * 0.043, tipo: 'prato' },
+    chao: base + u * 0.2, u,
+  };
+}
+function pecaNoPonto(x, y) {
+  const K = geoKit(); let melhor = null, dm = Infinity;
+  for (const p of KIT) {
+    const P = K[p], ry = P.tipo === 'bumbo' ? P.ry : Math.max(P.ry, P.rx * 0.45);
+    const d = Math.hypot((x - P.x) / P.rx, (y - P.y) / ry);
+    if (d < dm) { dm = d; melhor = p; }
+  }
+  return dm < 2.2 ? melhor : null;
+}
+function desenharPeca(P, nome, aceso) {
+  const cor = COR_KIT[nome];
+  g.save();
+  if (P.tipo === 'prato') {
+    g.strokeStyle = '#8a8aa0'; g.lineWidth = 3;   // pedestal
+    g.beginPath(); g.moveTo(P.x, P.y); g.lineTo(P.x, geoKit().chao - 10); g.stroke();
+    g.beginPath(); g.moveTo(P.x - 16, geoKit().chao); g.lineTo(P.x, geoKit().chao - 14); g.lineTo(P.x + 16, geoKit().chao); g.stroke();
+    const lg = g.createLinearGradient(P.x - P.rx, 0, P.x + P.rx, 0);
+    lg.addColorStop(0, '#9b7a1e'); lg.addColorStop(0.45, aceso ? '#fff7c2' : '#ffd96a'); lg.addColorStop(1, '#a57d16');
+    g.fillStyle = lg; g.beginPath(); g.ellipse(P.x, P.y, P.rx, P.ry, 0, 0, 7); g.fill();
+    g.strokeStyle = 'rgba(80,50,0,.5)'; g.lineWidth = 1;
+    for (const k of [0.35, 0.7]) { g.beginPath(); g.ellipse(P.x, P.y, P.rx * k, P.ry * k, 0, 0, 7); g.stroke(); }
+    g.fillStyle = '#5a4210'; g.beginPath(); g.ellipse(P.x, P.y, 4, 2, 0, 0, 7); g.fill();
+  } else if (P.tipo === 'tambor') {
+    // corpo
+    g.fillStyle = cor; g.beginPath();
+    g.moveTo(P.x - P.rx, P.y); g.lineTo(P.x - P.rx, P.y + P.alt); g.ellipse(P.x, P.y + P.alt, P.rx, P.ry, 0, Math.PI, 0, true); g.lineTo(P.x + P.rx, P.y); g.closePath(); g.fill();
+    g.fillStyle = 'rgba(0,0,0,.28)'; g.fillRect(P.x - P.rx, P.y + P.alt * 0.15, P.rx * 2, P.alt * 0.12);
+    g.fillStyle = 'rgba(255,255,255,.18)'; g.fillRect(P.x - P.rx * 0.8, P.y, P.rx * 0.22, P.alt);
+    // pele
+    g.fillStyle = aceso ? '#ffffff' : '#ece7f6'; g.strokeStyle = '#c9c4d6'; g.lineWidth = 3;
+    g.beginPath(); g.ellipse(P.x, P.y, P.rx, P.ry, 0, 0, 7); g.fill(); g.stroke();
+  } else {   // bumbo, visto de frente
+    g.fillStyle = '#1c1238'; g.beginPath(); g.arc(P.x, P.y, P.rx * 1.06, 0, 7); g.fill();
+    g.fillStyle = cor; g.beginPath(); g.arc(P.x, P.y, P.rx, 0, 7); g.fill();
+    const rg = g.createRadialGradient(P.x - P.rx * 0.3, P.y - P.rx * 0.3, 0, P.x, P.y, P.rx * 0.86);
+    rg.addColorStop(0, aceso ? '#ffffff' : '#f6f2ff'); rg.addColorStop(1, aceso ? '#f1e6ff' : '#d8d0ea');
+    g.fillStyle = rg; g.beginPath(); g.arc(P.x, P.y, P.rx * 0.86, 0, 7); g.fill();
+    g.fillStyle = cor; g.font = `900 ${Math.round(P.rx * 0.32)}px ${FONTE}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.globalAlpha *= 0.55; g.fillText('♪', P.x, P.y + 2); g.textBaseline = 'alphabetic';
+  }
+  g.restore();
+}
+function anelPeca(P, k, cor, alfa, largura) {   // k = 1 no momento de bater
+  g.save(); g.globalAlpha = alfa; g.strokeStyle = cor; g.lineWidth = largura;
+  g.shadowColor = cor; g.shadowBlur = 10;
+  const ry = P.tipo === 'bumbo' ? P.ry : P.ry;
+  g.beginPath(); g.ellipse(P.x, P.y, P.rx * k + 4, ry * k + 4, 0, 0, 7); g.stroke(); g.restore();
+}
+function desenharKit(t, janela, peso, agora) {
+  if (peso < 0.02) return;
+  const K = geoKit();
+  g.save(); g.globalAlpha = peso;
+  // tapetinho
+  g.fillStyle = 'rgba(10,4,30,.45)'; g.beginPath(); g.ellipse(W / 2, K.chao, K.u * 0.62, K.u * 0.09, 0, 0, 7); g.fill();
+  const ordem = ['pratoE', 'pratoD', 'bumbo', 'tom1', 'tom2', 'caixa'];
+  for (const p of ordem) desenharPeca(K[p], p, agora - (J.batida[p] || 0) < 110);
+  // anéis das notas chegando
+  const ap = janela * 0.85;
+  for (let i = Math.max(0, J.prox - 6); i < J.notas.length; i++) {
+    const n = J.notas[i]; if (n.t - t > ap) break;
+    if (n.instr !== 'bateria' || n.st === 1) continue;
+    const p = PECA_KIT[n.peca] || 'caixa', P = K[p], f = (n.t - t) / ap;   // 1 longe, 0 na hora
+    if (f < -0.12) continue;
+    if (n.st === 2) { anelPeca(P, 1, '#888', 0.5 * peso, 3); continue; }
+    const k = 1 + Math.max(0, f) * (P.tipo === 'bumbo' ? 0.75 : 1.0);
+    anelPeca(P, k, COR_KIT[p], peso * Math.min(1, (1 - f) * 2.5), f < 0.08 ? 6 : 4);
+  }
+  if (COMPUTADOR) {
+    g.font = `900 13px ${FONTE}`; g.textAlign = 'center';
+    for (const p of KIT) { const P = K[p], y = P.tipo === 'bumbo' ? P.y + P.ry + 18 : P.y - P.ry - 10;
+      g.fillStyle = 'rgba(10,4,30,.7)'; g.beginPath(); g.roundRect(P.x - 12, y - 14, 24, 19, 5); g.fill();
+      g.fillStyle = COR_KIT[p]; g.fillText(TECLA_KIT[p], P.x, y); }
+  }
+  g.restore();
+}
+function baterPeca(peca, ts = performance.now()) {
+  if (!J || J.fim || fase !== 'jogo') return;
+  J.batida[peca] = performance.now();
+  const t = tempo(ts);
+  if (t < -0.5) return;
+  let alvo = null;
+  for (let i = J.prox; i < J.notas.length; i++) {
+    const n = J.notas[i];
+    if (n.t - t > JANELA) break;
+    if (n.st !== 0 || n.instr !== 'bateria' || (PECA_KIT[n.peca] || 'caixa') !== peca) continue;
+    if (Math.abs(n.t - t) <= JANELA) { alvo = n; break; }
+  }
+  if (!alvo) { J.banda.errou('bateria'); quebrarCombo(); return; }
+  acertar(alvo, Math.abs(alvo.t - t));
+}
+const modoBateria = () => J && pesosInstr(tempo()).w.bateria > 0.5;
 
 // ---------- caixinhas do sabre ----------
 const COR_SABRE = ['#ff4d5e', '#3aa0ff'], ESC_SABRE = ['#a3182a', '#1452a0'];
@@ -748,10 +877,26 @@ function desenharSabre(t, janela, peso, agora) {
   const temNota = J.notas.slice(Math.max(0, J.prox - 4), J.prox + 40).some(n => n.instr === 'sabre' && n.t - t < janela * 1.3 && n.t > t - 0.5);
   if (peso < 0.02 && !temNota) return;
   const vx = W / 2, vy = H * 0.2, s1 = esc_(1.3);
-  // as "molduras" onde as caixinhas chegam
+  const a0 = alvoSabre(0), chaoAlvo = a0.y + a0.s * 0.95;   // onde fica a sombra quando é hora de cortar
+  const chaoDe = k => vy + (chaoAlvo - vy) * k;
+  // o chão: linhas indo pro fundo + a linha de corte
+  g.save(); g.globalAlpha = peso;
+  const lgc = g.createLinearGradient(0, vy, 0, H); lgc.addColorStop(0, 'rgba(10,4,30,0)'); lgc.addColorStop(1, 'rgba(10,4,30,.55)');
+  g.fillStyle = lgc; g.beginPath(); g.moveTo(vx - W * 0.04, vy); g.lineTo(vx + W * 0.04, vy); g.lineTo(W * 1.3, H); g.lineTo(-W * 0.3, H); g.closePath(); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,.1)'; g.lineWidth = 1.5;
+  for (let i = -3; i <= 3; i++) { g.beginPath(); g.moveTo(vx + i * W * 0.012, vy); g.lineTo(vx + i * W * 0.32, H); g.stroke(); }
+  // marcas de profundidade no ritmo (batidas chegando)
+  const BT = J.p.batidas || [];
+  for (let k = Math.max(0, bisseca(BT, t)); k < BT.length && BT[k] - t < janela * 1.3; k++) {
+    const z = (BT[k] - t) / janela, kk = (esc_(z) - s1) / (1 - s1), y = chaoDe(kk), larg = W * (0.04 + 0.42 * kk);
+    g.strokeStyle = `rgba(255,255,255,${0.05 + 0.1 * kk})`; g.beginPath(); g.moveTo(vx - larg, y); g.lineTo(vx + larg, y); g.stroke();
+  }
+  g.shadowColor = '#fff'; g.shadowBlur = 14; g.strokeStyle = 'rgba(255,255,255,.75)'; g.lineWidth = 4;
+  g.beginPath(); g.moveTo(W * 0.04, chaoAlvo); g.lineTo(W * 0.96, chaoAlvo); g.stroke();
+  g.restore();
   for (const lado of [0, 1]) {
     const a = alvoSabre(lado);
-    g.save(); g.globalAlpha = 0.5 * peso; g.strokeStyle = COR_SABRE[lado]; g.lineWidth = 3; g.setLineDash([10, 8]);
+    g.save(); g.globalAlpha = 0.22 * peso; g.strokeStyle = COR_SABRE[lado]; g.lineWidth = 3;
     g.beginPath(); g.roundRect(a.x - a.s / 2, a.y - a.s / 2, a.s, a.s, a.s * 0.18); g.stroke(); g.restore();
     if (COMPUTADOR && peso > 0.3) {
       g.save(); g.globalAlpha = peso; g.font = `900 14px ${FONTE}`; g.textAlign = 'center';
@@ -773,6 +918,11 @@ function desenharSabre(t, janela, peso, agora) {
     if (n.st === 2) y += (t - n.t) * 900 * Math.max(0, t - n.t);   // errou: cai
     const tam = a.s * (0.25 + 0.75 * Math.max(0, Math.min(1.25, k)));
     const alfa = Math.min(1, (1.3 - z) * 3) * (z < 0 ? Math.max(0, 1 + z * 2.2) : 1);
+    if (n.st !== 2) {   // sombra no chão: quando ela encosta na linha, é hora de cortar
+      const ys = chaoDe(Math.max(0, k));
+      g.save(); g.globalAlpha = alfa * 0.55; g.fillStyle = '#000';
+      g.beginPath(); g.ellipse(x, ys, tam * 0.5, tam * 0.13, 0, 0, 7); g.fill(); g.restore();
+    }
     caixinha(x, y, tam, n.lado, n.dir, alfa, n.st === 2);
   }
 }
@@ -990,11 +1140,22 @@ function laco(agora) {
 requestAnimationFrame(laco);
 
 // ---------- controles ----------
+// sem zoom de pinça nem de toque duplo (os gestos do sabre e da bateria atrapalhariam)
+for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(ev, e => e.preventDefault(), { passive: false });
+document.addEventListener('touchmove', e => { if (e.touches.length > 1 || fase === 'jogo') e.preventDefault(); }, { passive: false });
+let ultimoToque = 0;
+document.addEventListener('touchend', e => { const a = Date.now(); if (fase === 'jogo' && a - ultimoToque < 350) e.preventDefault(); ultimoToque = a; }, { passive: false });
+document.addEventListener('dblclick', e => e.preventDefault());
 const dedos = new Map();
 const golpes = new Map();   // dedos fazendo o movimento de corte (sabre)
 cv.addEventListener('pointerdown', e => {
   if (fase !== 'jogo') return;
   e.preventDefault();
+  if (modoBateria()) {
+    const r = cv.getBoundingClientRect(), p = pecaNoPonto(e.clientX - r.left, e.clientY - r.top);
+    if (p) baterPeca(p, e.timeStamp || performance.now());
+    return;
+  }
   if (modoSabre()) {
     golpes.set(e.pointerId, { x: e.clientX, y: e.clientY, ts: e.timeStamp || performance.now(), feito: false });
     try { cv.setPointerCapture(e.pointerId); } catch {}
@@ -1034,6 +1195,12 @@ cv.addEventListener('pointermove', e => {
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (fase === 'jogo') {
+    if (TECLAS_KIT[e.key === ' ' ? ' ' : k] && modoBateria()) {
+      e.preventDefault(); if (e.repeat) return;
+      baterPeca(TECLAS_KIT[e.key === ' ' ? ' ' : k], e.timeStamp || performance.now());
+      return;
+    }
+    if (k === 'e') soltarEnergia();
     if (TECLAS_SABRE[k] && modoSabre()) {
       e.preventDefault(); if (e.repeat) return;
       cortar(TECLAS_SABRE[k][0], TECLAS_SABRE[k][1], e.timeStamp || performance.now());

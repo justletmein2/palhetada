@@ -151,7 +151,7 @@ def montar_guitarra(G, dif, denso):
 def dedup(notas):
     vistos, out = set(), []
     for n in notas:
-        k = (n['t'], n['trilha'])
+        k = (n['t'], n.get('peca') or n['trilha'])
         if k in vistos: continue
         vistos.add(k); out.append(n)
     return out
@@ -191,15 +191,33 @@ def notas_bateria(y, beats):
     ct, cf = ev['caixa']
     m = np.array([not (np.min(np.abs(bt - t)) < 0.03 and f < 0.6) if len(bt) else True for t, f in zip(ct, cf)], bool)
     ev['caixa'] = (ct[m], cf[m])
+    # tons: "caixas" com quase nada de chiado agudo e muito grave-médio. Agudo = tom 1, mais grave = tom 2
+    ct, cf = ev['caixa']
+    fr = librosa.time_to_frames(ct, sr=SR, hop_length=HOP)
+    lo_b = (freqs >= 90) & (freqs < 400); hi_b = (freqs >= 1500) & (freqs < 6000)
+    r = np.array([S[lo_b, f:f + 4].sum() / (S[hi_b, f:f + 4].sum() + 1e-9) for f in fr]) if len(fr) else np.array([])
+    eh_tom = (r > np.percentile(r, 88)) & (r > np.median(r) * 1.5) if len(r) else np.array([], bool)
+    band = (freqs >= 80) & (freqs < 500)
+    cen = np.array([np.sum(freqs[band] * S[band, f:f + 4].sum(1)) / (S[band, f:f + 4].sum() + 1e-9) for f in fr[eh_tom]]) if eh_tom.any() else np.array([])
+    corte = np.median(cen) if len(cen) else 0
+    tt, tf_ = ct[eh_tom], cf[eh_tom]
+    ev['tom1'] = (tt[cen >= corte], tf_[cen >= corte]) if len(cen) else (np.array([]), np.array([]))
+    ev['tom2'] = (tt[cen < corte], tf_[cen < corte]) if len(cen) else (np.array([]), np.array([]))
+    ev['caixa'] = (ct[~eh_tom], cf[~eh_tom]) if len(r) else ev['caixa']
+    print('   tons', int(eh_tom.sum()), 'de', len(r))
     return ev
 
 def montar_bateria(D, beats, dif, denso):
     g16 = grade(beats, 4); g8 = grade(beats, 2)
-    lanes = {'bumbo': 0, 'caixa': 1, 'chimbal': 2, 'prato': 3}
+    lanes = {'bumbo': 0, 'caixa': 1, 'chimbal': 2, 'prato': 3, 'tom1': 1, 'tom2': 2}
     notas = []
     for peca, (ts, fs) in D.items():
         if len(ts) == 0: continue
-        if dif == 'facil':
+        if peca in ('tom1', 'tom2') and dif == 'facil': continue
+        if peca in ('tom1', 'tom2'):
+            idx = nms(ts, fs, 0.3 if dif == 'medio' else 0.13)
+            idx = [i for i in idx if fs[i] > (0.45 if dif == 'medio' else 0.3)]
+        elif dif == 'facil':
             if peca == 'chimbal': continue
             gap = 0.55 if peca != 'prato' else 2.0
             idx = nms(ts, fs * np.array([1.5 if encaixa(t, beats, 0.05)[1] else 0.6 for t in ts]), gap)
@@ -220,14 +238,28 @@ def montar_bateria(D, beats, dif, denso):
             notas.append(dict(t=round(float(t2), 3), trilha=lanes[peca], peca=peca, dur=0.0))
     notas.sort(key=lambda n: (n['t'], n['trilha']))
     notas = dedup(notas)
+    # viradas: 3 ou mais caixas bem rapidinhas seguidas descem pelos tons (caixa -> tom 1 -> tom 2)
+    if dif != 'facil':
+        cx = [n for n in notas if n['peca'] == 'caixa']
+        k = 0
+        while k < len(cx):
+            j = k
+            while j + 1 < len(cx) and cx[j + 1]['t'] - cx[j]['t'] <= 0.22: j += 1
+            if j - k >= 2:
+                run = cx[k:j + 1]
+                for q, n in enumerate(run):
+                    p = ['caixa', 'tom1', 'tom2'][min(2, q * 3 // len(run))]
+                    n['peca'] = p; n['trilha'] = {'caixa': 1, 'tom1': 1, 'tom2': 2}[p]
+            k = j + 1
     # no fácil e no médio, no máximo 2 ao mesmo tempo (e o prato manda)
     if True:
         out = []
-        for n in notas:
+        prio = {'prato': 0, 'bumbo': 1, 'caixa': 2, 'tom1': 2, 'tom2': 2, 'chimbal': 3}
+        for n in sorted(notas, key=lambda n: (round(n['t'], 2), prio[n['peca']])):
             mesmos = [x for x in out if abs(x['t'] - n['t']) < 0.02]
             if len(mesmos) >= {'facil': 1, 'medio': 2, 'dificil': 2 if denso <= 1 else 3}[dif]: continue
             out.append(n)
-        notas = out
+        notas = sorted(out, key=lambda n: (n['t'], n['trilha']))
     return notas
 
 # ---------------- sabre (caixinhas) ----------------

@@ -59,6 +59,10 @@
   e o Claude pega de lá. Depois `tools/gerar_mapas_suno.py <id>` (precisa de librosa) gera mapa + áudios; as
   `partes` (que instrumento em cada trecho) são escolhidas à mão no SONGS do script.
 - No jogo: `BandaFaixas` toca as 3 faixas juntas; errar abaixa a faixa do seu instrumento até acertar de novo.
+- Bateria (em todas as músicas): uma bateria de verdade desenhada (`geoKit`): 2 pratos elevados, caixa, tom 1, tom 2
+  e bumbo. Cada nota é um anel que encolhe até encostar na peça. Toque na peça; no PC: S D F J K + espaço (bumbo).
+  Energia no PC também com E. `chimbal` do mapa = prato da esquerda; `prato` = prato da direita.
+- Zoom do navegador bloqueado (pinça e toque duplo) pra não atrapalhar os gestos.
 - "Sabre" (caixinhas estilo Beat Saber) só existe nessas músicas: corte arrastando o polegar na direção da seta
   (metade esquerda da tela = caixa vermelha, direita = azul). No PC: W A S D (esquerda) e setas (direita).
   Só aparece com "Trocar de instrumento" ligado.
