@@ -58,6 +58,14 @@
   O computador do Claude não alcança os servidores do Suno: o navegador do app do Lucas baixa na pasta Downloads
   e o Claude pega de lá. Depois `tools/gerar_mapas_suno.py <id>` (precisa de librosa) gera mapa + áudios; as
   `partes` (que instrumento em cada trecho) são escolhidas à mão no SONGS do script.
+- Guitarra (`tools/guit.py`, método do Lucas): só tem nota onde a faixa está soando; cada nota começa num ataque
+  OU quando o pitch muda (legato); som sustentado (>0,42 s) = nota longa; mesma nota = mesma trilha, subiu = direita,
+  desceu = esquerda; acorde de verdade (vários sons juntos) = 2 notas com a mesma forma enquanto o acorde se repete.
+  O Difícil sai do som; Médio e Fácil são simplificações dele (palhetada rápida na mesma nota vira nota longa).
+  O forró usa a sanfona da mistura (música − bateria, sem graves), porque a faixa "brass" só tinha parte dela.
+- Sabre: grade 4 colunas x 3 alturas (`col`, `row`), caixinhas pequenas; cada mão alterna baixo/cima (paridade do
+  Beat Saber), reseta pra baixo depois de pausa; vermelha à esquerda, azul à direita; 1 em cada 4 frases com cortes
+  de lado. O corte vale pra caixinha mais perto do risco do dedo (tipo Fruit Ninja).
 - No jogo: `BandaFaixas` toca as 3 faixas juntas; errar abaixa a faixa do seu instrumento até acertar de novo.
 - Bateria (em todas as músicas): uma bateria de verdade desenhada (`geoKit`): 2 pratos elevados, caixa, tom 1, tom 2
   e bumbo. As notas caem em trilhas até a peça (o bumbo é uma barra roxa atravessando a tela) e a peça acende na hora. Toque na peça (faixa de baixo = bumbo); no PC: S D F J K + espaço (bumbo).

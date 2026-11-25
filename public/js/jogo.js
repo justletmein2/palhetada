@@ -171,23 +171,33 @@ function soltar(tr) {
   s.som(); J.segurando[tr] = null; s.n.st = 1;
 }
 // corte de uma caixinha (lado 0 = mão esquerda, 1 = direita)
-function cortar(lado, dir, ts = performance.now()) {
+function cortar(lado, dir, ts = performance.now(), risco = null) {
   if (!J || J.fim || fase !== 'jogo') return;
   const t = tempo(ts);
-  let alvo = null;
+  let alvo = null, melhor = Infinity;
   for (let i = J.prox; i < J.notas.length; i++) {
     const n = J.notas[i];
     if (n.t - t > JSABRE) break;
-    if (n.st !== 0 || n.instr !== 'sabre' || n.lado !== lado) continue;
-    if (Math.abs(n.t - t) <= JSABRE) { alvo = n; break; }
+    if (n.st !== 0 || n.instr !== 'sabre' || Math.abs(n.t - t) > JSABRE) continue;
+    if (!risco) { if (n.lado === lado) { alvo = n; break; } continue; }
+    // dedo: vale a caixinha mais perto do risco que o dedo fez (tipo Fruit Ninja)
+    const p = alvoSabre(n.lado, n), d = distSeg(p.x, p.y, risco);
+    const custo = d / p.s + (n.dir === dir ? 0 : 0.5);
+    if (d < p.s * 1.6 && custo < melhor) { melhor = custo; alvo = n; }
   }
   if (!alvo) return;   // cortar o vento não tira ponto
+  lado = alvo.lado;
   if (alvo.dir !== dir) {   // lado certo, direção errada
     errarNota(alvo);
-    J.efeitos.push({ sabre: true, lado, errado: true, txt: COMPUTADOR ? 'DIREÇÃO!' : '✗', cor: '#ff8a8a', ini: performance.now() });
+    J.efeitos.push({ sabre: true, lado, n: alvo, errado: true, txt: COMPUTADOR ? 'DIREÇÃO!' : '✗', cor: '#ff8a8a', ini: performance.now() });
     return;
   }
   acertar(alvo, Math.max(0, Math.abs(alvo.t - t) - 0.04));
+}
+function distSeg(px, py, r) {
+  const vx = r.x2 - r.x1, vy = r.y2 - r.y1, L = vx * vx + vy * vy || 1;
+  const k = Math.max(0, Math.min(1, ((px - r.x1) * vx + (py - r.y1) * vy) / L));
+  return Math.hypot(px - (r.x1 + vx * k), py - (r.y1 + vy * k));
 }
 const modoSabre = () => J && pesosInstr(tempo()).w.sabre > 0.5;
 function acertar(n, d) {
@@ -209,8 +219,8 @@ function acertar(n, d) {
     J.efeitos.push({ kit: pk, txt: repetido ? '' : q[0], cor: d <= PERFEITO ? '#fff36b' : '#fff', ini: performance.now() });
     for (let i = 0; i < 10; i++) J.faiscas.push({ palco: true, x: P.x, y: P.y, a: Math.random() * Math.PI, v: 120 + Math.random() * 200, ini: performance.now(), cor: n.estrela ? '#bff6ff' : COR_KIT[pk] });
   } else if (n.instr === 'sabre') {
-    const p = alvoSabre(n.lado);
-    J.efeitos.push({ sabre: true, lado: n.lado, dir: n.dir, txt: repetido || !COMPUTADOR ? '' : q[0], cor: d <= PERFEITO ? '#fff36b' : '#fff', ini: performance.now() });
+    const p = alvoSabre(n.lado, n);
+    J.efeitos.push({ sabre: true, lado: n.lado, n, dir: n.dir, txt: repetido || !COMPUTADOR ? '' : q[0], cor: d <= PERFEITO ? '#fff36b' : '#fff', ini: performance.now() });
     for (let i = 0; i < 14; i++) J.faiscas.push({ palco: true, x: p.x, y: p.y, a: Math.random() * Math.PI * 2, v: 120 + Math.random() * 260, ini: performance.now(), cor: n.estrela ? '#bff6ff' : COR_SABRE[n.lado] });
   } else {
     J.efeitos.push({ tr: n.trilha, txt: repetido ? '' : q[0], cor: d <= PERFEITO ? '#fff36b' : '#fff', ini: performance.now() });
@@ -903,7 +913,10 @@ const modoBateria = () => J && pesosInstr(tempo()).w.bateria > 0.5;
 // ---------- caixinhas do sabre ----------
 const COR_SABRE = ['#ff4d5e', '#3aa0ff'], ESC_SABRE = ['#a3182a', '#1452a0'];
 const SETA = { cima: -Math.PI / 2, baixo: Math.PI / 2, esq: Math.PI, dir: 0 };
-const alvoSabre = lado => ({ x: W * (lado ? 0.74 : 0.26), y: H * 0.66, s: Math.min(W * 0.38, H * 0.21) });
+// grade de 4 colunas x 3 alturas (como no Beat Saber); caixinhas menores
+const TAM_SABRE = () => Math.min(W * 0.17, H * 0.095);
+const posSabre = (col, row) => ({ x: W * (0.17 + 0.22 * col), y: H * (0.74 - 0.115 * row), s: TAM_SABRE() });
+const alvoSabre = (lado, n) => n && n.col != null ? posSabre(n.col, n.row) : posSabre(lado ? 3 : 0, 0);
 function caixinha(x, y, tam, lado, dir, alfa, cinza) {
   g.save(); g.globalAlpha = alfa;
   const h = tam / 2;
@@ -937,7 +950,7 @@ function desenharSabre(t, janela, peso, agora) {
   const temNota = J.notas.slice(Math.max(0, J.prox - 4), J.prox + 40).some(n => n.instr === 'sabre' && n.t - t < janela * 1.3 && n.t > t - 0.5);
   if (peso < 0.02 && !temNota) return;
   const vx = W / 2, vy = H * 0.2, s1 = esc_(1.3);
-  const a0 = alvoSabre(0), chaoAlvo = a0.y + a0.s * 0.95;   // onde fica a sombra quando é hora de cortar
+  const a0 = posSabre(0, 0), chaoAlvo = a0.y + a0.s * 0.9;   // onde fica a sombra quando é hora de cortar
   const chaoDe = k => vy + (chaoAlvo - vy) * k;
   // o chão: linhas indo pro fundo + a linha de corte
   g.save(); g.globalAlpha = peso;
@@ -956,8 +969,6 @@ function desenharSabre(t, janela, peso, agora) {
   g.restore();
   for (const lado of [0, 1]) {
     const a = alvoSabre(lado);
-    g.save(); g.globalAlpha = 0.22 * peso; g.strokeStyle = COR_SABRE[lado]; g.lineWidth = 3;
-    g.beginPath(); g.roundRect(a.x - a.s / 2, a.y - a.s / 2, a.s, a.s, a.s * 0.18); g.stroke(); g.restore();
     if (COMPUTADOR && peso > 0.3) {
       g.save(); g.globalAlpha = peso; g.font = `900 14px ${FONTE}`; g.textAlign = 'center';
       g.fillStyle = 'rgba(10,4,30,.7)'; g.beginPath(); g.roundRect(a.x - 46, a.y + a.s / 2 + 10, 92, 22, 6); g.fill();
@@ -971,7 +982,7 @@ function desenharSabre(t, janela, peso, agora) {
     lista.push(n);
   }
   for (let i = lista.length - 1; i >= 0; i--) {
-    const n = lista[i], z = (n.t - t) / janela, a = alvoSabre(n.lado);
+    const n = lista[i], z = (n.t - t) / janela, a = alvoSabre(n.lado, n);
     if (z < -0.45) continue;
     const k = Math.max(-0.6, (esc_(Math.max(-0.3, z)) - s1) / (1 - s1));   // 0 lá no fundo, 1 no alvo
     let x = vx + (a.x - vx) * k, y = vy + (a.y - vy) * k;
@@ -987,7 +998,7 @@ function desenharSabre(t, janela, peso, agora) {
   }
 }
 function efeitoSabre(e, agora) {
-  const k = (agora - e.ini) / 650, a = alvoSabre(e.lado);
+  const k = (agora - e.ini) / 650, a = alvoSabre(e.lado, e.n);
   if (!e.errado && k < 0.6) {   // a caixinha partida em dois pedaços voando
     const ang = SETA[e.dir] + Math.PI / 2, sep = k * a.s * 1.1;
     g.save(); g.globalAlpha = 1 - k / 0.6;
@@ -1236,7 +1247,9 @@ cv.addEventListener('pointermove', e => {
     if (Math.hypot(dx, dy) < 25) return;
     const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'dir' : 'esq') : (dy > 0 ? 'baixo' : 'cima');
     const agoraTs = e.timeStamp || performance.now();
-    cortar(gp.x < cv.getBoundingClientRect().left + cv.clientWidth / 2 ? 0 : 1, dir, (gp.ts + agoraTs) / 2);
+    const rc = cv.getBoundingClientRect();
+    cortar(gp.x < rc.left + cv.clientWidth / 2 ? 0 : 1, dir, (gp.ts + agoraTs) / 2,
+      { x1: gp.x - rc.left - dx, y1: gp.y - rc.top - dy, x2: e.clientX - rc.left + dx * 0.5, y2: e.clientY - rc.top + dy * 0.5 });
     golpes.set(e.pointerId, { x: e.clientX, y: e.clientY, ts: agoraTs });   // dá pra emendar outro corte sem tirar o dedo
     return;
   }

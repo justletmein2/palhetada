@@ -10,11 +10,11 @@ SONGS = {
   'blues': dict(nome='Blues da Casquinha', emoji='🍦', cor='#3aa0ff', desc='Blues sobre a casquinha que caiu no chão', inst='guitar', nomeInst='Guitarra',
                 partes=[(0,'guitarra'),(24,'bateria'),(50,'sabre'),(78,'guitarra'),(138,'bateria'),(156,'sabre'),(182,'guitarra')], denso=1.0),
   'chiko': dict(nome='Chikorita na Garra', emoji='🌿', cor='#2fdc6b', desc='Metal árabe com dubstep: a saga da máquina de garra', inst='guitar', nomeInst='Guitarra',
-                partes=[(0,'guitarra'),(52,'sabre'),(72,'guitarra'),(124,'bateria'),(166,'guitarra'),(187,'sabre'),(228,'bateria'),(252,'guitarra')], denso=1.0, gapDif=0.15),
+                partes=[(0,'guitarra'),(52,'sabre'),(72,'guitarra'),(124,'bateria'),(166,'guitarra'),(187,'sabre'),(228,'bateria'),(252,'guitarra')], denso=1.0, gapG=0.15),
   'dracula': dict(nome='Drácula, o Morceguinho', emoji='🦇', cor='#b46bff', desc='O morcego que invadiu a festa de Halloween', inst='guitar', nomeInst='Guitarra',
                 partes=[(0,'guitarra'),(20,'bateria'),(48,'guitarra'),(108,'sabre'),(132,'guitarra'),(152,'bateria')], denso=1.0),
   'forro': dict(nome='Forró Arretado', emoji='🪗', cor='#ffb800', desc='Sanfona endiabrada. Difícil de verdade!', inst='sanfona', nomeInst='Sanfona',
-                partes=[(0,'guitarra'),(34,'bateria'),(56,'guitarra'),(80,'sabre'),(96,'guitarra'),(130,'bateria'),(148,'guitarra')], denso=1.6, gapDif=0.058),
+                partes=[(0,'guitarra'),(34,'bateria'),(56,'guitarra'),(80,'sabre'),(96,'guitarra'),(130,'bateria'),(148,'guitarra')], denso=1.6, gapG=0.085, fonte='raw/forro_lead.wav', poliAcorde=99, acordeForca=88),
 }
 
 def load(path, sr=SR):
@@ -264,27 +264,56 @@ def montar_bateria(D, beats, dif, denso):
 
 # ---------------- sabre (caixinhas) ----------------
 def montar_sabre(D, beats, dif, denso):
+    """Caixinhas no estilo Beat Saber, seguindo as regras de mapeamento:
+    - cada mão alterna corte pra baixo / pra cima (paridade): o dedo desce antes de poder subir de novo;
+    - depois de uma pausa longa a mão "reseta" e começa de novo pra baixo;
+    - vermelha do lado esquerdo, azul do direito (sem cruzar as mãos);
+    - no fácil quase tudo na fileira de baixo; no médio/difícil variam altura e coluna;
+    - às vezes um trecho inteiro com cortes de lado (esquerda/direita), também alternando."""
     g8 = grade(beats, 2)
     bt = D['bumbo'][0]; ct = D['caixa'][0]; pt = D['prato'][0]
     perto = lambda arr, t, tol=0.06: len(arr) > 0 and np.min(np.abs(arr - t)) < tol
-    if dif == 'facil': base = beats[::2]
-    elif dif == 'medio': base = beats
-    else:
-        base = [t for t in g8 if t in beats or perto(bt, t) or perto(ct, t)]
+    if dif == 'facil': base = list(beats[::2])
+    elif dif == 'medio': base = list(beats)
+    else: base = [t for t in g8 if np.min(np.abs(beats - t)) < 0.02 or perto(bt, t) or perto(ct, t)]
     base = np.array(sorted(base))
-    out, lado = [], 0
-    DIRS = ['baixo', 'cima', 'esq', 'dir']
-    for k, t in enumerate(base):
-        if out and t - out[-1]['t'] < {'facil': 0.85, 'medio': 0.42, 'dificil': 0.21}[dif]: continue
-        if perto(ct, t): d = 'cima' if lado == 0 else 'baixo'
-        elif perto(bt, t): d = 'baixo' if lado == 0 else 'cima'
-        else: d = 'esq' if lado == 0 else 'dir'
-        if dif == 'facil': d = 'baixo'
-        n = dict(t=round(float(t), 3), lado=lado, dir=d)
-        out.append(n)
-        if dif == 'dificil' and perto(pt, t, 0.08):   # prato: as duas mãos juntas
-            out.append(dict(t=n['t'], lado=1 - lado, dir='baixo' if d == 'cima' else 'cima'))
-        lado = 1 - lado
+    gap_total = {'facil': 0.8, 'medio': 0.4, 'dificil': 0.24}[dif]
+    gap_mao = {'facil': 1.4, 'medio': 0.75, 'dificil': 0.42}[dif]
+    out = []
+    ult = {0: -9, 1: -9}; prox_dir = {0: 'baixo', 1: 'baixo'}; col = {0: 0, 1: 3}
+    mao = 0; frase_h = False; frase_ant = -1
+    for t in base:
+        if out and t - out[-1]['t'] < gap_total: continue
+        # escolhe a mão: alterna; se a outra ainda não "voltou", usa a mesma
+        m = mao
+        if t - ult[m] < gap_mao: m = 1 - m
+        if t - ult[m] < gap_mao * 0.8: continue
+        if t - ult[m] > 1.6: prox_dir[m] = 'baixo'   # pausa longa: reseta
+        frase = int(np.searchsorted(beats, t) // 16)
+        if frase != frase_ant:
+            frase_ant = frase
+            frase_h = dif != 'facil' and frase % 4 == 3      # 1 em cada 4 frases com cortes de lado
+            col = {0: 0, 1: 3} if frase % 2 == 0 or dif == 'facil' else {0: 1, 1: 2}
+        d = prox_dir[m]
+        if frase_h: d = {'baixo': 'esq' if m == 0 else 'dir', 'cima': 'dir' if m == 0 else 'esq'}[d]
+        c = col[m]
+        if frase_h: c = (0 if d == 'esq' else 1) if m == 0 else (2 if d == 'esq' else 3)
+        # altura: pra baixo começa mais alto, pra cima começa embaixo
+        if dif == 'facil': row = 0
+        elif d == 'baixo': row = 2 if perto(pt, t, 0.08) else 1
+        elif d == 'cima': row = 0
+        else: row = 1 if dif == 'dificil' else 0
+        if c in (1, 2) and row == 1: row = {'cima': 0, 'baixo': 2}.get(d, 0)   # nada bem na frente do rosto
+        out.append(dict(t=round(float(t), 3), lado=m, dir=d, col=int(c), row=int(row)))
+        ult[m] = t; prox_dir[m] = 'cima' if prox_dir[m] == 'baixo' else 'baixo'
+        mao = 1 - m
+        # prato no difícil: as duas mãos juntas, cada uma no seu próprio movimento
+        o = 1 - m
+        if dif == 'dificil' and not frase_h and perto(pt, t, 0.08) and t - ult[o] >= gap_mao:
+            if t - ult[o] > 1.6: prox_dir[o] = 'baixo'
+            d2 = prox_dir[o]
+            out.append(dict(t=round(float(t), 3), lado=o, dir=d2, col=0 if o == 0 else 3, row=2 if d2 == 'baixo' else 0))
+            ult[o] = t; prox_dir[o] = 'cima' if d2 == 'baixo' else 'baixo'
     return out
 
 # ---------------- áudio ----------------
@@ -312,13 +341,22 @@ def main(sid, so_mapa=False):
     tempo, bf = librosa.beat.beat_track(y=dr + 0.3 * mix, sr=SR, hop_length=HOP, units='time', tightness=200)
     beats = np.asarray(bf, float)
     print(sid, 'bpm', tempo, 'batidas', len(beats))
-    G = notas_guitarra(gu, beats, S['denso']); G['gapDif'] = S.get('gapDif')
+    import guit, pickle
+    cachep = f'/tmp/{sid}_guit.pkl'
+    if os.path.exists(cachep): A, E = pickle.load(open(cachep, 'rb'))
+    else:
+        yg = load(S['fonte']) if S.get('fonte') else gu
+        A = guit.analisar(yg); E = guit.segmentar(A); pickle.dump((A, E), open(cachep, 'wb'))
+    g16 = grade(beats, 4); g8 = grade(beats, 2)
+    fcorte = np.percentile([e['forca'] for e in E], S['acordeForca']) if S.get('acordeForca') else 1e9
+    gd = guit.finalizar(guit.afinar(guit.montar(E, g16, 'dificil', lambda e: (e['poli'] >= S.get('poliAcorde', 3) and e['voz'] < 0.3) or e['forca'] >= fcorte), S.get('gapG', 0.1)))
+    GUIT = {'dificil': gd, 'medio': guit.simplificar(gd, 'medio', g8, beats), 'facil': guit.simplificar(gd, 'facil', g8, beats)}
     D = notas_bateria(dr, beats)
     # partes: começo de cada parte encaixa na batida mais perto
     partes = [dict(t=round(float(encaixa(t, beats, 9)[0]) if t > 0 else 0.0, 3), instr=i) for t, i in S['partes']]
     notas = {}
     for dif in ('facil', 'medio', 'dificil'):
-        notas[dif] = dict(guitarra=montar_guitarra(G, dif, S['denso']), bateria=montar_bateria(D, beats, dif, S['denso']),
+        notas[dif] = dict(guitarra=GUIT[dif], bateria=montar_bateria(D, beats, dif, S['denso']),
                           sabre=montar_sabre(D, beats, dif, S['denso']))
         print(' ', dif, {k: len(v) for k, v in notas[dif].items()})
     mapa = dict(v=2, id=sid, nome=S['nome'], emoji=S['emoji'], cor=S['cor'], desc=S['desc'], nomeGuitarra=S['nomeInst'],

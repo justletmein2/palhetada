@@ -227,7 +227,7 @@ function partituraFaixas(mapa, dif, op) {
     const fimParte = k + 1 < trocas.length ? trocas[k + 1].t : Infinity;
     for (const n of N[p.instr]) {
       if (n.t < p.t || n.t >= fimParte) continue;
-      if (p.instr === 'sabre') notas.push({ t: n.t, lado: n.lado, dir: n.dir, trilha: -1, dur: 0, fim: n.t, instr: 'sabre' });
+      if (p.instr === 'sabre') notas.push({ t: n.t, lado: n.lado, dir: n.dir, col: n.col, row: n.row, trilha: -1, dur: 0, fim: n.t, instr: 'sabre' });
       else {
         const dur = n.dur > 0 ? Math.max(0, Math.min(n.dur, fimParte - n.t - 0.15)) : 0;
         notas.push({ t: n.t, trilha: n.trilha, dur: dur > 0.25 ? dur : 0, fim: n.t + (dur > 0.25 ? dur : 0), midi: 0, peca: n.peca, instr: p.instr });
