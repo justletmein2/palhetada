@@ -63,14 +63,13 @@
   desceu = esquerda; acorde de verdade (vários sons juntos) = 2 notas com a mesma forma enquanto o acorde se repete.
   O Difícil sai do som; Médio e Fácil são simplificações dele (palhetada rápida na mesma nota vira nota longa).
   O forró usa a sanfona da mistura (música − bateria, sem graves), porque a faixa "brass" só tinha parte dela.
-- Sabre: grade 4 colunas x 3 alturas (`col`, `row`), caixinhas pequenas; cada mão alterna baixo/cima (paridade do
-  Beat Saber), reseta pra baixo depois de pausa; vermelha à esquerda, azul à direita; 1 em cada 4 frases com cortes
-  de lado. O corte vale pra caixinha mais perto do risco do dedo (tipo Fruit Ninja).
+- Sabre (agora estilo Fruit Ninja): notas musicais (♪ ♫) são arremessadas de baixo e fazem uma parábola; o ponto mais
+  alto é a hora da nota (`voo()`). Vermelhas na metade esquerda (polegar esquerdo), azuis na direita. Qualquer direção
+  de corte vale, um risco pode cortar várias; deixar cair não quebra combo (é pra ser catártico). `col`/`row` do mapa
+  = onde fica o ponto mais alto; `dir` do mapa não é mais usado. No PC: A S D F (vermelhas), J K L Ç (azuis).
 - No jogo: `BandaFaixas` toca as 3 faixas juntas; errar abaixa a faixa do seu instrumento até acertar de novo.
 - Bateria (em todas as músicas): uma bateria de verdade desenhada (`geoKit`): 2 pratos elevados, caixa, tom 1, tom 2
   e bumbo (com metade das notas que o detector acha: o Lucas achou difícil demais). As notas caem em trilhas até a peça (o bumbo é uma barra roxa atravessando a tela) e a peça acende na hora. Toque na peça (faixa de baixo = bumbo); no PC: S D F J K + espaço (bumbo).
   Energia no PC também com E. `chimbal` do mapa = prato da esquerda; `prato` = prato da direita.
 - Zoom do navegador bloqueado (pinça e toque duplo) pra não atrapalhar os gestos.
-- "Sabre" (caixinhas estilo Beat Saber) só existe nessas músicas: corte arrastando o polegar na direção da seta
-  (metade esquerda da tela = caixa vermelha, direita = azul). No PC: W A S D (esquerda) e setas (direita).
-  Só aparece com "Trocar de instrumento" ligado.
+- O Sabre só existe nessas músicas e só aparece com "Trocar de instrumento" ligado.
