@@ -16,7 +16,10 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const CORES = ['#2fdc6b', '#ff4d5e', '#ffd23f', '#3aa0ff'];
 const ESCURAS = ['#138a3f', '#b3202f', '#c79a00', '#1660b3'];
 const JANELA = 0.135, PERFEITO = 0.05, OTIMO = 0.09; // segundos de tolerância
-const TECLAS = { d: 0, f: 1, j: 2, k: 3 };
+// no computador: D F J K (ou A S K L, 1 2 3 4, ou as setas ← ↓ ↑ →)
+const TECLAS = { d: 0, f: 1, j: 2, k: 3, a: 0, s: 1, l: 3, '1': 0, '2': 1, '3': 2, '4': 3, arrowleft: 0, arrowdown: 1, arrowup: 2, arrowright: 3 };
+const ROTULOS = ['D', 'F', 'J', 'K'];
+const COMPUTADOR = matchMedia('(hover: hover) and (pointer: fine)').matches;
 
 // ---------- estado geral ----------
 let PERFIL = { tag: '', look: null, xp: 0 };
@@ -121,7 +124,7 @@ const tempo = (perfMs = performance.now()) => (perfMs - J.perf0) / 1000 - latenc
 const mult = () => Math.min(4, 1 + Math.floor(J.combo / 10));
 const dobrado = () => !!J.dobro;
 
-function pressionar(tr, ts = performance.now()) {
+function pressionar(tr, ts = performance.now(), deslizando = false) {
   if (!J || J.fim || fase !== 'jogo') return;
   J.apertado[tr] = performance.now();
   const t = tempo(ts);
@@ -134,6 +137,7 @@ function pressionar(tr, ts = performance.now()) {
     if (Math.abs(n.t - t) <= JANELA) { alvo = n; break; }
   }
   if (!alvo) { // tocou sem nota
+    if (deslizando) return;   // arrastando o dedo: passar por trilha vazia não é erro
     J.banda.errou(); quebrarCombo();
     J.efeitos.push({ tr, txt: '', cor: '#888', ini: performance.now(), x: true });
     return;
@@ -189,6 +193,21 @@ function soltarEnergia() {
   const t = tempo();
   J.dobro = { ini: t, fim: t + J.energia * 16 };
   J.energia = 0; aviso('⚡ PONTOS EM DOBRO!'); falar('SOLTA O SOM! ⚡', 1800); som1([523, 784, 1046, 1568]);
+}
+// o "tcharan": arpejo subindo + acorde final + prato
+function tcharanSom(est) {
+  const c = audio(); if (!c) return;
+  const t = c.currentTime + 0.05;
+  const notas = est <= 2 ? [392, 330, 262] : [523, 659, 784, 1046];
+  notas.forEach((f, i) => bipe(c, f, 0.14, 0.12, t + i * 0.09));
+  if (est <= 2) return;
+  [523, 659, 784, 1046].forEach(f => bipe(c, f, 0.9, 0.07, t + notas.length * 0.09 + 0.05));
+  try {
+    const s = c.createBufferSource(), b = c.createBuffer(1, c.sampleRate, c.sampleRate), d = b.getChannelData(0);
+    for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / d.length, 3);
+    const f = c.createBiquadFilter(), gg = c.createGain(); f.type = 'highpass'; f.frequency.value = 5000; gg.gain.value = 0.25;
+    s.buffer = b; s.connect(f).connect(gg).connect(c.destination); s.start(t + notas.length * 0.09 + 0.05);
+  } catch {}
 }
 function som1(fs) { const c = audio(); if (c) fs.forEach((f, i) => bipe(c, f, 0.12, 0.08, c.currentTime + i * 0.07)); }
 
@@ -529,6 +548,14 @@ function desenharJogo() {
       g.fillStyle = lg; g.beginPath(); g.moveTo(p.x - rAlvo * 0.8, p.y); g.lineTo(p.x + rAlvo * 0.8, p.y); g.lineTo(p.x + rAlvo * 0.3, p.y - alt); g.lineTo(p.x - rAlvo * 0.3, p.y - alt); g.closePath(); g.fill();
     }
   }
+  if (COMPUTADOR) {   // no computador, mostra qual tecla é cada trilha
+    g.font = `900 15px ${FONTE}`; g.textAlign = 'center';
+    for (let tr = 0; tr < 4; tr++) {
+      const p = ponto(G, tr, 0), y = p.y + rAlvo * 0.62 + 6;
+      g.fillStyle = 'rgba(10,4,30,.7)'; g.beginPath(); g.roundRect(p.x - 13, y, 26, 22, 6); g.fill();
+      g.fillStyle = CORES[tr]; g.fillText(ROTULOS[tr], p.x, y + 16);
+    }
+  }
   // notas
   const vis = [];
   for (let i = Math.max(0, J.prox - 8); i < J.notas.length; i++) {
@@ -642,12 +669,86 @@ function desenharMenu(dt, t) {
 }
 ajustarTela();
 
+
+// ---------- fim da música: o boneco comemora com a guitarra pro alto, confete e fogos ----------
+const FESTA = { ini: 0, animo: 1, confete: [], fogos: [] };
+function comecarFesta(animo) {
+  FESTA.ini = performance.now(); FESTA.animo = animo; FESTA.confete = []; FESTA.fogos = [];
+  const cores = ['#2fdc6b', '#ff4d5e', '#ffd23f', '#3aa0ff', '#ff3d8b', '#ffffff'];
+  for (let i = 0; i < 90 * animo + 20; i++) FESTA.confete.push({ x: Math.random() * W, y: -Math.random() * H * 0.8, v: 60 + Math.random() * 120, a: Math.random() * 7, va: (Math.random() - .5) * 8, c: cores[i % 6], w: 5 + Math.random() * 5 });
+}
+function desenharFesta(dt, t) {
+  fundo(t, false, FESTA.animo);
+  const k = (performance.now() - FESTA.ini) / 1000;
+  // fogos de artifício
+  if (FESTA.animo >= 0.6 && Math.random() < dt * 2.2 * FESTA.animo) {
+    const x = W * (0.15 + Math.random() * 0.7), y = H * (0.08 + Math.random() * 0.22), c = CORES[Math.floor(Math.random() * 4)];
+    for (let i = 0; i < 26; i++) { const a = i / 26 * Math.PI * 2; FESTA.fogos.push({ x, y, vx: Math.cos(a) * 140, vy: Math.sin(a) * 140, ini: performance.now(), c }); }
+  }
+  FESTA.fogos = FESTA.fogos.filter(f => performance.now() - f.ini < 900);
+  g.save(); g.globalCompositeOperation = 'lighter';
+  for (const f of FESTA.fogos) {
+    const q = (performance.now() - f.ini) / 1000;
+    g.globalAlpha = 1 - q / 0.9; g.fillStyle = f.c;
+    g.beginPath(); g.arc(f.x + f.vx * q, f.y + f.vy * q + 60 * q * q, 2.6, 0, 7); g.fill();
+  }
+  g.restore(); g.globalAlpha = 1;
+  // o boneco, em cima do palco
+  if (DANC.img) {
+    const S = Math.min(112, H * 0.13, W * 0.28), cx = W / 2, pe = Math.min(H * 0.4, 330) - 14;
+    const per = 0.42, f = (t / per) % 1, n = Math.floor(t / per), an = FESTA.animo;
+    const pulo = Math.abs(Math.sin(f * Math.PI)) * S * 0.3 * an;
+    const entra = Math.min(1, k / 0.5);   // sobe no palco no começo
+    g.save();
+    const rg = g.createRadialGradient(cx, pe, 0, cx, pe, S * 1.3);
+    rg.addColorStop(0, 'rgba(255,255,255,.5)'); rg.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = rg; g.beginPath(); g.ellipse(cx, pe, S * 1.3, S * 0.25, 0, 0, 7); g.fill();
+    g.translate(cx, pe - pulo + (1 - entra) * S * 2); g.rotate(Math.sin(f * Math.PI * 2) * 0.08 * an);
+    const pern = S * 0.42, tronco = S * 0.42, larg = S * 0.5, topo = -pern - tronco;
+    const abre = an > 0.3 ? Math.sin(f * Math.PI) * S * 0.08 : 0;
+    g.lineCap = 'round'; g.lineWidth = S * 0.13; g.strokeStyle = '#2b1d5c';
+    g.beginPath(); g.moveTo(-larg * 0.22, -pern); g.lineTo(-larg * 0.34 - abre, -S * 0.04); g.stroke();
+    g.beginPath(); g.moveTo(larg * 0.22, -pern); g.lineTo(larg * 0.34 + abre, -S * 0.04); g.stroke();
+    g.fillStyle = '#fff';
+    g.beginPath(); g.ellipse(-larg * 0.34 - abre - S * 0.03, -S * 0.03, S * 0.1, S * 0.05, 0, 0, 7); g.fill();
+    g.beginPath(); g.ellipse(larg * 0.34 + abre + S * 0.03, -S * 0.03, S * 0.1, S * 0.05, 0, 0, 7); g.fill();
+    g.fillStyle = DANC.roupa;
+    g.beginPath(); g.moveTo(-larg / 2, topo); g.lineTo(larg / 2, topo); g.lineTo(larg * 0.4, -pern + S * 0.02); g.lineTo(-larg * 0.4, -pern + S * 0.02); g.closePath(); g.fill();
+    // braços pra cima (o direito segura a guitarra lá no alto)
+    const aceno = Math.sin(t * 9) * S * 0.06 * an;
+    const maoE = [-S * 0.55 - aceno, topo - S * (0.25 + 0.35 * an)], maoD = [S * 0.5, topo - S * (0.3 + 0.4 * an)];
+    g.lineWidth = S * 0.11; g.strokeStyle = DANC.roupa;
+    g.beginPath(); g.moveTo(-larg * 0.45, topo + S * 0.05); g.quadraticCurveTo(-larg * 0.9, topo - S * 0.05, maoE[0], maoE[1]); g.stroke();
+    g.beginPath(); g.moveTo(larg * 0.45, topo + S * 0.05); g.quadraticCurveTo(larg * 0.9, topo - S * 0.05, maoD[0], maoD[1]); g.stroke();
+    g.save(); g.translate(maoD[0], maoD[1]); g.rotate(-0.55 + Math.sin(t * 6) * 0.1 * an);
+    g.fillStyle = '#3a2a1a'; g.fillRect(-S * 0.05, -S * 0.035, S * 0.6, S * 0.07);
+    g.fillStyle = '#1a1208'; g.fillRect(S * 0.52, -S * 0.06, S * 0.13, S * 0.12);
+    g.fillStyle = '#e8304a'; g.beginPath(); g.ellipse(-S * 0.18, 0, S * 0.2, S * 0.16, 0, 0, 7); g.fill();
+    g.beginPath(); g.ellipse(-S * 0.02, 0, S * 0.13, S * 0.11, 0, 0, 7); g.fill();
+    g.fillStyle = '#fff'; g.beginPath(); g.ellipse(-S * 0.2, 0, S * 0.05, S * 0.12, 0, 0, 7); g.fill();
+    g.restore();
+    g.fillStyle = DANC.pele;
+    g.beginPath(); g.arc(maoE[0], maoE[1], S * 0.07, 0, 7); g.fill();
+    g.beginPath(); g.arc(maoD[0], maoD[1], S * 0.07, 0, 7); g.fill();
+    g.translate(0, topo + S * 0.08); g.rotate(Math.sin(f * Math.PI * 2) * 0.12 * an);
+    g.drawImage(DANC.img, -S / 2, -S * 0.98, S, S);
+    g.restore();
+  }
+  // confete
+  for (const c of FESTA.confete) {
+    c.y += c.v * dt; c.a += c.va * dt; c.x += Math.sin(c.a) * 20 * dt;
+    if (c.y > H + 10 && k < 6) { c.y = -10; c.x = Math.random() * W; }
+    g.save(); g.translate(c.x, c.y); g.rotate(c.a); g.fillStyle = c.c; g.fillRect(-c.w / 2, -c.w / 4, c.w, c.w / 2); g.restore();
+  }
+}
+
 // ---------- laço ----------
 let ultimo = performance.now();
 function laco(agora) {
   const dt = Math.min(0.05, (agora - ultimo) / 1000); ultimo = agora;
   g.clearRect(0, 0, W, H);
   if (fase === 'jogo' && J) { passo(); desenharJogo(); }
+  else if (fase === 'fim' && J) desenharFesta(dt, agora / 1000);
   else desenharMenu(dt, agora / 1000);
   requestAnimationFrame(laco);
 }
@@ -664,11 +765,37 @@ cv.addEventListener('pointerdown', e => {
 });
 const largou = e => { const tr = dedos.get(e.pointerId); if (tr == null) return; dedos.delete(e.pointerId); if (![...dedos.values()].includes(tr)) soltar(tr); };
 cv.addEventListener('pointerup', largou); cv.addEventListener('pointercancel', largou);
+// glissando: arrastou o dedo pra trilha do lado = tocou ela (como deslizar no teclado de um piano).
+// Passar por uma trilha sem nota não conta como erro, então dá pra "varrer" as sequências rápidas.
+cv.addEventListener('pointermove', e => {
+  if (fase !== 'jogo' || !dedos.has(e.pointerId)) return;
+  const antes = dedos.get(e.pointerId), agora = trilhaDoX(e.clientX);
+  if (agora === antes) return;
+  dedos.set(e.pointerId, agora);
+  if (![...dedos.values()].includes(antes)) soltar(antes);
+  const passo = agora > antes ? 1 : -1;
+  for (let tr = antes + passo; ; tr += passo) {   // se pulou trilhas no meio do caminho, toca elas também
+    pressionar(tr, e.timeStamp || performance.now(), true);
+    if (tr === agora) break;
+    if (![...dedos.values()].includes(tr)) soltar(tr);
+  }
+});
 addEventListener('keydown', e => {
-  if (fase !== 'jogo' || e.repeat) return;
-  const tr = TECLAS[e.key.toLowerCase()];
-  if (tr != null) pressionar(tr, e.timeStamp || performance.now());
-  if (e.key === ' ') soltarEnergia();
+  const k = e.key.toLowerCase();
+  if (fase === 'jogo') {
+    const tr = TECLAS[k];
+    if (tr != null || k === ' ') e.preventDefault();   // setas e espaço não rolam a página
+    if (e.repeat) return;
+    if (tr != null) pressionar(tr, e.timeStamp || performance.now());
+    if (k === ' ') soltarEnergia();
+    if (k === 'escape') $('btnSairJogo').click();
+    return;
+  }
+  // nos menus: Enter confirma o botão principal da tela
+  if (k !== 'enter' || ['INPUT', 'BUTTON', 'A'].includes(document.activeElement && document.activeElement.tagName)) return;
+  const principal = { telaMusicas: 'btnTocarSolo', telaFim: 'btnDeNovo', telaComo: 'btnComoOk', telaAtraso: 'btnAtrasoOk', telaSala: 'btnComecar' };
+  const tela = Object.keys(principal).find(t => !$(t).hidden);
+  if (tela && !$(principal[tela]).hidden) { e.preventDefault(); $(principal[tela]).click(); }
 });
 addEventListener('keyup', e => { const tr = TECLAS[e.key.toLowerCase()]; if (tr != null) soltar(tr); });
 $('btnEnergia').onclick = () => soltarEnergia();
@@ -689,6 +816,11 @@ function terminar() {
   }
   desenharFim(); mostrar('telaFim');
   const est = estrelasDe(J.acertos / J.notas.length);
+  const animo = [0.25, 0.45, 0.75, 0.9, 1][est - 1];
+  comecarFesta(animo); $('telaFim').classList.toggle('fraco', est <= 2);
+  $('tcharan').textContent = est <= 2 ? 'Ufa, acabou!' : 'TCHARAN!';
+  $('tcharan').style.animation = 'none'; void $('tcharan').offsetWidth; $('tcharan').style.animation = '';
+  tcharanSom(est);
   if (!J.online) ganharXP(est >= 3 ? 5 : 2);
 }
 function desenharFim() {
@@ -701,7 +833,7 @@ function desenharFim() {
   if (!J.online) {
     $('fimTitulo').textContent = frases[est - 1];
     $('fimLista').innerHTML = `<p class="peq">${esc(J.m.emoji + ' ' + J.m.nome)} · ${DIFS[J.dif].emoji} ${DIFS[J.dif].nome}</p>`;
-    $('btnDeNovo').hidden = false; $('fimEspera').hidden = true;
+    $('btnDeNovo').hidden = false; $('btnOutra').hidden = false; $('fimEspera').hidden = true;
     return;
   }
   const res = M.partida.resultado || {}, est2 = M.partida.estado || {};
@@ -717,8 +849,7 @@ function desenharFim() {
     const info = r ? `${pontosDe(id).toLocaleString('pt-BR')} pts<br>${DIFS[r.d] ? DIFS[r.d].emoji : ''} ${Math.round(r.a / r.n * 100)}% · combo ${r.mc}` : `${pontosDe(id).toLocaleString('pt-BR')} pts<br>tocando…`;
     return `<div class="jog ${i === 0 && todos ? 'vence' : ''} ${p.online ? '' : 'off'}"><div class="av">${bonecoSVG(p.look, 44) || '🙂'}</div>${esc(p.name || '?')}<small>${info}</small></div>`;
   }).join('');
-  $('btnDeNovo').hidden = !M.host; $('fimEspera').hidden = M.host;
-  $('btnDeNovo').textContent = '🔁 Tocar de novo';
+  $('btnDeNovo').hidden = !M.host; $('btnOutra').hidden = !M.host; $('fimEspera').hidden = M.host;
 }
 
 // ======================= sozinho =======================
@@ -932,7 +1063,14 @@ $('btnCopiar').onclick = async () => {
   try { if (navigator.share) await navigator.share({ title: 'Palhetada', text: 'Bora tocar Palhetada comigo? 🎸', url: link }); else { await navigator.clipboard.writeText(link); toast('Convite copiado! 📋'); } }
   catch { try { await navigator.clipboard.writeText(link); toast('Convite copiado! 📋'); } catch { toast(link, 5000); } }
 };
-$('btnDeNovo').onclick = () => { if (M.code) { fase = 'sala'; mostrar('telaSala'); desenharSala(); } else telaSolo(); };
+// Jogar de novo = a mesma música e dificuldade, na hora
+$('btnDeNovo').onclick = () => {
+  if (M.code) { if (M.host) comecarOnline(); return; }
+  if (J) { escolha.musica = J.m.id; escolha.dif = J.dif; guardar('ph-escolha', escolha); }
+  comecarSolo();
+};
+// Selecionar outra música = volta pra lista (sozinho) ou pra sala (quem criou escolhe)
+$('btnOutra').onclick = () => { if (M.code) { fase = 'sala'; mostrar('telaSala'); desenharSala(); } else { fase = 'inicio'; telaSolo(); } };
 const sairPartida = () => { if (J && J.banda) J.banda.parar(); if (M.code) sairSala(); else { J = null; fase = 'inicio'; mostrar('telaInicio'); } };
 let sairArmado = 0;
 $('btnSairJogo').onclick = () => {

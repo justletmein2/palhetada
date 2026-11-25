@@ -76,10 +76,11 @@
       <p>As notas descem pelas <b>4 trilhas</b>. Toque na trilha certa quando a nota passar pelo <b>círculo</b> lá embaixo. Pode tocar em qualquer altura da tela, o que vale é a coluna.</p>
       <p>Acertou, a guitarra toca. Errou, ela engasga 😬</p>
       <p><b>Nota com rabo</b>: segure o dedo até o rabo acabar.</p>
+      <p><b>Sequência rápida?</b> Arraste o dedo de uma trilha pra outra, como num piano: cada trilha que o dedo cruza toca a nota dela.</p>
       <p><b>Combo</b>: a cada 10 acertos seguidos os pontos multiplicam (até x4). Tocar sem nota quebra o combo.</p>
       <p>Notas ⭐ <b>brilhantes</b>: acerte todas da frase pra encher a <b>energia</b>. Com meia barra, aperte <b>⚡ SOLTA O SOM</b> e ganhe pontos em dobro.</p>
       <p>Na sala, todo mundo toca a mesma música junto, cada um na dificuldade que quiser. Ganha quem fizer mais pontos.</p>
-      <p class="peq">No computador: teclas D F J K.<br>Com fone bluetooth, ajuste em ⏱️ Atraso.</p>
+      <p class="peq">No computador: teclas D F J K (ou as setas), espaço solta a energia, Esc sai, Enter confirma.<br>Com fone bluetooth, ajuste em ⏱️ Atraso.</p>
       <button id="btnComoOk" class="grande">Bora!</button>
     </div>
   </section>
@@ -136,13 +137,15 @@
 
   <!-- FIM -->
   <section id="telaFim" class="tela" hidden>
+    <div id="tcharan" aria-hidden="true">TCHARAN!</div>
     <div class="caixa">
       <h2 id="fimTitulo"></h2>
       <div id="fimEstrelas" class="estrelas"></div>
       <div id="fimMeu" class="meu"></div>
       <div id="fimLista" class="lista"></div>
-      <button id="btnDeNovo" class="grande">🔁 Tocar de novo</button>
-      <p id="fimEspera" class="peq" hidden>Esperando quem criou a sala…</p>
+      <button id="btnDeNovo" class="grande">🔁 Jogar de novo</button>
+      <button id="btnOutra" class="grande outra">🎵 Selecionar outra música</button>
+      <p id="fimEspera" class="peq" hidden>Esperando quem criou a sala escolher…</p>
       <button id="btnFimSair" class="link">Sair</button>
     </div>
   </section>
