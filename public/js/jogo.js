@@ -3,7 +3,7 @@
 // Multiplayer: todo mundo da sala toca a MESMA música ao mesmo tempo (horário do servidor),
 // cada um na sua dificuldade, e os pontos vão aparecendo ao vivo pros outros.
 import * as rede from './rede.js';
-import { MUSICAS, musicaPorId, DIFS, partitura, Banda, BandaAudio, bipe, carregarLista, carregar, carregada, INSTRUMENTOS, INSTR_PADRAO, ligados } from './musica.js';
+import { MUSICAS, musicaPorId, DIFS, partitura, Banda, BandaAudio, BandaFaixas, bipe, carregarLista, carregar, carregada, INSTRUMENTOS, INSTR_PADRAO, ligados } from './musica.js';
 import * as extras from './extras.js';
 
 // a prévia (fora do site do jogo) não consegue falar com o servidor: só sozinho
@@ -16,6 +16,9 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const CORES = ['#2fdc6b', '#ff4d5e', '#ffd23f', '#3aa0ff'];
 const ESCURAS = ['#138a3f', '#b3202f', '#c79a00', '#1660b3'];
 const JANELA = 0.135, PERFEITO = 0.05, OTIMO = 0.09; // segundos de tolerância
+const JSABRE = 0.2;   // as caixinhas do sabre têm um pouco mais de folga (o corte leva um tempinho)
+// sabre no teclado: W A S D = mão esquerda, setas (ou I J K L) = mão direita
+const TECLAS_SABRE = { w: [0, 'cima'], a: [0, 'esq'], s: [0, 'baixo'], d: [0, 'dir'], arrowup: [1, 'cima'], arrowleft: [1, 'esq'], arrowdown: [1, 'baixo'], arrowright: [1, 'dir'], i: [1, 'cima'], j: [1, 'esq'], k: [1, 'baixo'], l: [1, 'dir'] };
 // no computador: D F J K (ou A S K L, 1 2 3 4, ou as setas ← ↓ ↑ →)
 const TECLAS = { d: 0, f: 1, j: 2, k: 3, a: 0, s: 1, l: 3, '1': 0, '2': 1, '3': 2, '4': 3, arrowleft: 0, arrowdown: 1, arrowup: 2, arrowright: 3 };
 const ROTULOS = ['D', 'F', 'J', 'K'];
@@ -121,12 +124,12 @@ function novaPartida({ musica, dif, inicioPerf, online, ids = [], rodada = 0, in
   const ctx = audio();
   if (J && J.banda) J.banda.parar();
   const m = musicaPorId(musica), p = partitura(m, dif, instr);
-  if (m.arquivo && instr && instr.troca) setTimeout(() => toast('Essa música ainda só tem guitarra 🎸', 2600), 400);
+  if (m.arquivo && !m.arquivo.pasta && instr && instr.troca) setTimeout(() => toast('Essa música ainda só tem guitarra 🎸', 2600), 400);
   const t0 = ctx.currentTime + (inicioPerf - performance.now()) / 1000;
   const frases = {};
   p.notas.forEach(n => { if (n.estrela) { frases[n.frase] = frases[n.frase] || { total: 0, acertos: 0, falhou: false }; frases[n.frase].total++; } });
   J = {
-    m, dif, p, notas: p.notas.map(n => ({ ...n, st: 0 })), perf0: inicioPerf, banda: new (m.arquivo ? BandaAudio : Banda)(ctx, m, p, t0),
+    m, dif, p, notas: p.notas.map(n => ({ ...n, st: 0 })), perf0: inicioPerf, banda: new (m.arquivo ? (m.arquivo.pasta ? BandaFaixas : BandaAudio) : Banda)(ctx, m, p, t0),
     janela: DIFS[dif].janela, pontos: 0, combo: 0, maxCombo: 0, acertos: 0, perfeitos: 0, erros: 0, errosSeguidos: 0,
     energia: 0, dobro: null, frases, segurando: [null, null, null, null], apertado: [0, 0, 0, 0], efeitos: [], faiscas: [],
     online, ids, rodada, fim: false, prox: 0, ultEnvio: 0, contou: -1, avisoTroca: 0,
@@ -154,7 +157,7 @@ function pressionar(tr, ts = performance.now(), deslizando = false) {
   }
   if (!alvo) { // tocou sem nota
     if (deslizando) return;   // arrastando o dedo: passar por trilha vazia não é erro
-    J.banda.errou(); quebrarCombo();
+    J.banda.errou(pesosInstr(t).atual); quebrarCombo();
     J.efeitos.push({ tr, txt: '', cor: '#888', ini: performance.now(), x: true });
     return;
   }
@@ -167,20 +170,47 @@ function soltar(tr) {
   if (!s) return;
   s.som(); J.segurando[tr] = null; s.n.st = 1;
 }
+// corte de uma caixinha (lado 0 = mão esquerda, 1 = direita)
+function cortar(lado, dir, ts = performance.now()) {
+  if (!J || J.fim || fase !== 'jogo') return;
+  const t = tempo(ts);
+  let alvo = null;
+  for (let i = J.prox; i < J.notas.length; i++) {
+    const n = J.notas[i];
+    if (n.t - t > JSABRE) break;
+    if (n.st !== 0 || n.instr !== 'sabre' || n.lado !== lado) continue;
+    if (Math.abs(n.t - t) <= JSABRE) { alvo = n; break; }
+  }
+  if (!alvo) return;   // cortar o vento não tira ponto
+  if (alvo.dir !== dir) {   // lado certo, direção errada
+    errarNota(alvo);
+    J.efeitos.push({ sabre: true, lado, errado: true, txt: 'DIREÇÃO!', cor: '#ff8a8a', ini: performance.now() });
+    return;
+  }
+  acertar(alvo, Math.max(0, Math.abs(alvo.t - t) - 0.04));
+}
+const modoSabre = () => J && pesosInstr(tempo()).w.sabre > 0.5;
 function acertar(n, d) {
   const q = d <= PERFEITO ? ['PERFEITO!', 50] : d <= OTIMO ? ['ÓTIMO', 40] : ['BOM', 25];
   J.combo++; J.maxCombo = Math.max(J.maxCombo, J.combo); J.acertos++; J.errosSeguidos = 0;
   if (d <= PERFEITO) J.perfeitos++;
   J.pontos += q[1] * mult() * (dobrado() ? 2 : 1);
-  const som = n.instr === 'bateria' ? J.banda.tambor(n.peca)
+  const som = n.instr === 'sabre' ? (J.banda.corte ? J.banda.corte(n.lado) : J.banda.tambor('caixa'), () => {})
+    : n.instr === 'bateria' ? J.banda.tambor(n.peca)
     : n.instr === 'teclado' ? J.banda.piano(n.midi, n.dur > 0 ? n.dur + 0.15 : 0.6)
     : J.banda.solo(n.midi, n.dur > 0 ? n.dur + 0.15 : 0.3);
   if (n.dur > 0) { n.st = 3; n.ate = n.t; J.segurando[n.trilha] = { n, som }; } else n.st = 1;
   // acorde: um texto só (senão os dois "PERFEITO!" se encavalam)
   const ultimoTxt = J.efeitos.filter(e => e.txt).pop();
   const repetido = ultimoTxt && performance.now() - ultimoTxt.ini < 60;
-  J.efeitos.push({ tr: n.trilha, txt: repetido ? '' : q[0], cor: d <= PERFEITO ? '#fff36b' : '#fff', ini: performance.now() });
-  for (let i = 0; i < 10; i++) J.faiscas.push({ tr: n.trilha, a: Math.random() * Math.PI, v: 120 + Math.random() * 220, ini: performance.now(), cor: n.estrela ? '#bff6ff' : CORES[n.trilha] });
+  if (n.instr === 'sabre') {
+    const p = alvoSabre(n.lado);
+    J.efeitos.push({ sabre: true, lado: n.lado, dir: n.dir, txt: repetido ? '' : q[0], cor: d <= PERFEITO ? '#fff36b' : '#fff', ini: performance.now() });
+    for (let i = 0; i < 14; i++) J.faiscas.push({ palco: true, x: p.x, y: p.y, a: Math.random() * Math.PI * 2, v: 120 + Math.random() * 260, ini: performance.now(), cor: n.estrela ? '#bff6ff' : COR_SABRE[n.lado] });
+  } else {
+    J.efeitos.push({ tr: n.trilha, txt: repetido ? '' : q[0], cor: d <= PERFEITO ? '#fff36b' : '#fff', ini: performance.now() });
+    for (let i = 0; i < 10; i++) J.faiscas.push({ tr: n.trilha, a: Math.random() * Math.PI, v: 120 + Math.random() * 220, ini: performance.now(), cor: n.estrela ? '#bff6ff' : CORES[n.trilha] });
+  }
   if (n.estrela) {
     const f = J.frases[n.frase]; f.acertos++;
     if (f.acertos === f.total && !f.falhou) {
@@ -195,6 +225,7 @@ function acertar(n, d) {
 }
 function errarNota(n) {
   n.st = 2; J.erros++;
+  if (J.banda.falhou) J.banda.falhou(n.instr);
   if (n.estrela) J.frases[n.frase].falhou = true;
   quebrarCombo();
 }
@@ -248,9 +279,9 @@ function passo() {
   for (let i = J.prox; i < J.notas.length; i++) {
     const n = J.notas[i];
     if (n.t > t - JANELA) break;
-    if (n.st === 0) errarNota(n);
+    if (n.st === 0 && !(n.instr === 'sabre' && n.t > t - JSABRE)) errarNota(n);
   }
-  while (J.prox < J.notas.length && J.notas[J.prox].st !== 0 && J.notas[J.prox].t < t - JANELA) J.prox++;
+  while (J.prox < J.notas.length && J.notas[J.prox].st !== 0 && J.notas[J.prox].t < t - JSABRE) J.prox++;
   if (J.dobro && t > J.dobro.fim) J.dobro = null;
   // contagem antes das notas chegarem
   const primeira = J.notas[0].t, falta = primeira - t;
@@ -262,7 +293,10 @@ function passo() {
   const TR = J.p.trocas || [];
   for (let k = J.avisoTroca; k < TR.length; k++) {
     if (TR[k].t - t > 1.7) break;
-    if (k > 0 || TR[k].instr !== 'guitarra') { const I = INSTRUMENTOS[TR[k].instr]; aviso(`${I.emoji} ${I.nome.toUpperCase()}!`, 1300); som1([660, 990]); }
+    if (k > 0 || TR[k].instr !== 'guitarra') {
+      const I = (J.p.nomes && J.p.nomes[TR[k].instr]) || INSTRUMENTOS[TR[k].instr];
+      aviso(TR[k].instr === 'sabre' ? '⚔️ CORTE AS CAIXINHAS!' : `${I.emoji} ${I.nome.toUpperCase()}!`, 1300); som1([660, 990]);
+    }
     J.avisoTroca = k + 1;
   }
   // placar pros outros
@@ -483,7 +517,7 @@ function desenharDancarino(t, G) {
   // guitarra (na bateria some; no teclado vira um "keytar" branco)
   const instrAgora = pesosInstr(t).atual;
   g.save(); g.translate(S * 0.02, -pern - tronco * 0.35); g.rotate(-0.45 + (nivel ? Math.sin(ph) * 0.06 : 0));
-  if (instrAgora === 'bateria') g.globalAlpha = 0;
+  if (instrAgora === 'bateria' || instrAgora === 'sabre') g.globalAlpha = 0;
   g.fillStyle = '#3a2a1a'; g.fillRect(-S * 0.75, -S * 0.035, S * 0.62, S * 0.07);              // braço
   g.fillStyle = '#1a1208'; g.fillRect(-S * 0.86, -S * 0.06, S * 0.13, S * 0.12);               // cabeça do braço
   g.fillStyle = instrAgora === 'teclado' ? '#f4f1ff' : '#e8304a';
@@ -498,12 +532,15 @@ function desenharDancarino(t, G) {
   g.lineWidth = S * 0.11; g.strokeStyle = DANC.roupa;
   g.beginPath(); g.moveTo(-larg * 0.45, topo + S * 0.05); g.quadraticCurveTo(-larg * 0.75, -pern - tronco * 0.4, -S * 0.42, -pern - tronco * 0.12 - S * 0.16); g.stroke();
   g.beginPath(); g.moveTo(larg * 0.45, topo + S * 0.05); g.quadraticCurveTo(larg * 0.6, -pern - tronco * 0.2, S * 0.06, -pern - tronco * 0.45 + pal); g.stroke();
-  if (instrAgora === 'bateria') {   // baquetas batendo no ritmo
-    g.strokeStyle = '#e9d3a3'; g.lineWidth = S * 0.035;
+  if (instrAgora === 'bateria' || instrAgora === 'sabre') {   // baquetas batendo no ritmo (ou dois sabres de luz)
+    const sab = instrAgora === 'sabre';
+    g.lineWidth = S * (sab ? 0.05 : 0.035);
     const bate = Math.sin(ph * 2) * 0.5;
     for (const [hx, hy, lado] of [[-S * 0.42, -pern - tronco * 0.12 - S * 0.16, -1], [S * 0.06, -pern - tronco * 0.45 + pal, 1]]) {
-      const ang = -Math.PI / 2 + lado * (0.5 + (lado > 0 ? bate : -bate) * 0.6);
-      g.beginPath(); g.moveTo(hx, hy); g.lineTo(hx + Math.cos(ang) * S * 0.45, hy + Math.sin(ang) * S * 0.45); g.stroke();
+      const ang = -Math.PI / 2 + lado * (0.5 + (lado > 0 ? bate : -bate) * 0.6), L = S * (sab ? 0.7 : 0.45);
+      g.save(); g.strokeStyle = sab ? (lado < 0 ? COR_SABRE[0] : COR_SABRE[1]) : '#e9d3a3';
+      if (sab) { g.shadowColor = g.strokeStyle; g.shadowBlur = 12; g.lineCap = 'round'; }
+      g.beginPath(); g.moveTo(hx, hy); g.lineTo(hx + Math.cos(ang) * L, hy + Math.sin(ang) * L); g.stroke(); g.restore();
     }
   }
   g.fillStyle = DANC.pele;
@@ -523,7 +560,7 @@ function pesosInstr(t) {
   let i = 0; for (let k = 0; k < TR.length; k++) if (t >= TR[k].t - ANT) i = k;
   const atual = TR[i].instr, ant = i > 0 ? TR[i - 1].instr : atual;
   const f = i > 0 ? Math.max(0, Math.min(1, (t - (TR[i].t - ANT)) / DUR)) : 1;
-  const w = { guitarra: 0, bateria: 0, teclado: 0 }; w[ant] += 1 - f; w[atual] += f;
+  const w = { guitarra: 0, bateria: 0, teclado: 0, sabre: 0 }; w[ant] += 1 - f; w[atual] += f;
   return { w, atual };
 }
 // ---------- a pista ----------
@@ -534,9 +571,9 @@ function desenharJogo() {
   fundo(t, dob, intensidade);
   desenharDancarino(t, G);
   const zBaixo = -0.13;
-  const PI = pesosInstr(t), WI = PI.w;
-  // corpo da pista (fica quase transparente na bateria e no teclado)
-  g.globalAlpha = 0.28 + 0.72 * WI.guitarra;
+  const PI = pesosInstr(t), WI = PI.w, vis = 1 - WI.sabre;
+  // corpo da pista (fica quase transparente na bateria e no teclado; some nas caixinhas do sabre)
+  g.globalAlpha = (0.28 + 0.72 * WI.guitarra) * vis;
   const pts = [ponto(G, -0.5, 1), ponto(G, 3.5, 1), ponto(G, 3.5, zBaixo), ponto(G, -0.5, zBaixo)];
   const gr = g.createLinearGradient(0, pts[0].y, 0, pts[2].y);
   gr.addColorStop(0, dob ? 'rgba(10,60,100,.55)' : 'rgba(12,6,30,.55)'); gr.addColorStop(0.35, dob ? 'rgba(12,70,120,.92)' : 'rgba(14,8,34,.92)'); gr.addColorStop(1, dob ? 'rgba(18,90,150,.97)' : 'rgba(20,10,46,.97)');
@@ -553,7 +590,7 @@ function desenharJogo() {
     const a = ponto(G, i - 0.5, 1), b = ponto(G, i - 0.5, zBaixo);
     g.strokeStyle = 'rgba(255,255,255,.09)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
   }
-  g.globalAlpha = 1;
+  g.globalAlpha = vis;
   // linhas de tempo
   const bat = J.p.oitavo * 2, BT = J.p.batidas;
   const k0 = BT ? Math.max(0, bisseca(BT, t - 0.3)) : Math.ceil((t - 0.3) / bat);
@@ -577,6 +614,7 @@ function desenharJogo() {
   g.beginPath(); g.moveTo(l1.x, l1.y); g.lineTo(l2.x, l2.y); g.stroke(); g.restore();
   // alvos
   const rAlvo = G.larg / 4 * 0.37;
+  g.globalAlpha = 1;
   if (WI.teclado > 0) { g.globalAlpha = WI.teclado; desenharTeclado(G, rAlvo, zBaixo); g.globalAlpha = 1; }
   if (WI.bateria > 0) { g.globalAlpha = WI.bateria; desenharBateria(G, rAlvo); g.globalAlpha = 1; }
   for (let tr = 0; tr < 4 && WI.guitarra > 0.02; tr++) {
@@ -599,8 +637,8 @@ function desenharJogo() {
       g.fillStyle = lg; g.beginPath(); g.moveTo(p.x - rAlvo * 0.8, p.y); g.lineTo(p.x + rAlvo * 0.8, p.y); g.lineTo(p.x + rAlvo * 0.3, p.y - alt); g.lineTo(p.x - rAlvo * 0.3, p.y - alt); g.closePath(); g.fill();
     }
   }
-  g.globalAlpha = 1;
-  if (COMPUTADOR) {   // no computador, mostra qual tecla é cada trilha
+  g.globalAlpha = vis;
+  if (COMPUTADOR && vis > 0.02) {   // no computador, mostra qual tecla é cada trilha
     g.font = `900 15px ${FONTE}`; g.textAlign = 'center';
     for (let tr = 0; tr < 4; tr++) {
       const p = ponto(G, tr, 0), y = p.y + rAlvo * 0.62 + 6;
@@ -608,14 +646,15 @@ function desenharJogo() {
       g.fillStyle = CORES[tr]; g.fillText(ROTULOS[tr], p.x, y + 16);
     }
   }
+  g.globalAlpha = 1;
   // notas
-  const vis = [];
+  const visiveis = [];
   for (let i = Math.max(0, J.prox - 8); i < J.notas.length; i++) {
     const n = J.notas[i]; if (n.t - t > janela) break;
-    if (n.fim < t - 0.4) continue; vis.push(n);
+    if (n.fim < t - 0.4) continue; if (n.instr !== 'sabre') visiveis.push(n);
   }
-  for (let i = vis.length - 1; i >= 0; i--) {
-    const n = vis[i];
+  for (let i = visiveis.length - 1; i >= 0; i--) {
+    const n = visiveis[i];
     if (n.dur > 0 && n.st !== 1) {   // rabo da nota longa
       const zi = Math.max(zBaixo, ((n.st === 3 ? Math.max(n.t, t) : n.t) - t) / janela), zf = Math.min(1, (n.fim - t) / janela);
       if (zf > zi) {
@@ -637,6 +676,7 @@ function desenharJogo() {
     joia(p.x, p.y, r, n.trilha, n.st === 2 ? 'erro' : n.estrela ? 'estrela' : '', agora, n.instr);
     g.globalAlpha = 1;
   }
+  desenharSabre(t, janela, WI.sabre, agora);
   // explosões de acerto (anel que cresce) e faíscas
   J.faiscas = J.faiscas.filter(f => agora - f.ini < 500);
   g.save(); g.globalCompositeOperation = 'lighter';
@@ -651,6 +691,7 @@ function desenharJogo() {
   J.efeitos = J.efeitos.filter(e => agora - e.ini < 650);
   g.textAlign = 'center';
   for (const e of J.efeitos) {
+    if (e.sabre) { efeitoSabre(e, agora); continue; }
     const p = ponto(G, e.tr, 0), k = (agora - e.ini) / 650;
     if (e.x) {
       g.globalAlpha = 1 - k; g.strokeStyle = '#ff4d5e'; g.lineWidth = 5; g.lineCap = 'round'; const s = 11;
@@ -683,6 +724,79 @@ function desenharJogo() {
   const prog = Math.max(0, Math.min(1, t / J.p.duracao));
   g.fillStyle = 'rgba(255,255,255,.15)'; g.fillRect(0, H - 4, W, 4);
   g.fillStyle = J.m.cor; g.fillRect(0, H - 4, W * prog, 4);
+}
+
+// ---------- caixinhas do sabre ----------
+const COR_SABRE = ['#ff4d5e', '#3aa0ff'], ESC_SABRE = ['#a3182a', '#1452a0'];
+const SETA = { cima: -Math.PI / 2, baixo: Math.PI / 2, esq: Math.PI, dir: 0 };
+const alvoSabre = lado => ({ x: W * (lado ? 0.73 : 0.27), y: H * 0.64, s: Math.min(W * 0.3, H * 0.17) });
+function caixinha(x, y, tam, lado, dir, alfa, cinza) {
+  g.save(); g.translate(x, y); g.globalAlpha = alfa;
+  const r = tam * 0.18;
+  g.fillStyle = 'rgba(0,0,0,.35)'; g.beginPath(); g.roundRect(-tam / 2 + tam * 0.05, -tam / 2 + tam * 0.08, tam, tam, r); g.fill();
+  const lg = g.createLinearGradient(0, -tam / 2, 0, tam / 2);
+  lg.addColorStop(0, cinza ? '#9a9aa6' : COR_SABRE[lado]); lg.addColorStop(1, cinza ? '#55555f' : ESC_SABRE[lado]);
+  g.fillStyle = lg; g.beginPath(); g.roundRect(-tam / 2, -tam / 2, tam, tam, r); g.fill();
+  g.strokeStyle = 'rgba(255,255,255,.55)'; g.lineWidth = Math.max(1.5, tam * 0.04); g.stroke();
+  // seta pra onde cortar
+  g.rotate(SETA[dir]); g.fillStyle = '#fff';
+  g.beginPath(); g.moveTo(tam * 0.3, 0); g.lineTo(-tam * 0.05, -tam * 0.26); g.lineTo(-tam * 0.05, -tam * 0.1); g.lineTo(-tam * 0.28, -tam * 0.1);
+  g.lineTo(-tam * 0.28, tam * 0.1); g.lineTo(-tam * 0.05, tam * 0.1); g.lineTo(-tam * 0.05, tam * 0.26); g.closePath(); g.fill();
+  g.restore();
+}
+function desenharSabre(t, janela, peso, agora) {
+  const temNota = J.notas.slice(Math.max(0, J.prox - 4), J.prox + 40).some(n => n.instr === 'sabre' && n.t - t < janela * 1.3 && n.t > t - 0.5);
+  if (peso < 0.02 && !temNota) return;
+  const vx = W / 2, vy = H * 0.2, s1 = esc_(1.3);
+  // as "molduras" onde as caixinhas chegam
+  for (const lado of [0, 1]) {
+    const a = alvoSabre(lado);
+    g.save(); g.globalAlpha = 0.5 * peso; g.strokeStyle = COR_SABRE[lado]; g.lineWidth = 3; g.setLineDash([10, 8]);
+    g.beginPath(); g.roundRect(a.x - a.s / 2, a.y - a.s / 2, a.s, a.s, a.s * 0.18); g.stroke(); g.restore();
+    if (COMPUTADOR && peso > 0.3) {
+      g.save(); g.globalAlpha = peso; g.font = `900 14px ${FONTE}`; g.textAlign = 'center';
+      g.fillStyle = 'rgba(10,4,30,.7)'; g.beginPath(); g.roundRect(a.x - 46, a.y + a.s / 2 + 10, 92, 22, 6); g.fill();
+      g.fillStyle = COR_SABRE[lado]; g.fillText(lado ? '← ↑ ↓ →' : 'W A S D', a.x, a.y + a.s / 2 + 26); g.restore();
+    }
+  }
+  const lista = [];
+  for (let i = Math.max(0, J.prox - 8); i < J.notas.length; i++) {
+    const n = J.notas[i]; if (n.t - t > janela * 1.3) break;
+    if (n.instr !== 'sabre' || n.st === 1) continue;
+    lista.push(n);
+  }
+  for (let i = lista.length - 1; i >= 0; i--) {
+    const n = lista[i], z = (n.t - t) / janela, a = alvoSabre(n.lado);
+    if (z < -0.45) continue;
+    const k = Math.max(-0.6, (esc_(Math.max(-0.3, z)) - s1) / (1 - s1));   // 0 lá no fundo, 1 no alvo
+    let x = vx + (a.x - vx) * k, y = vy + (a.y - vy) * k;
+    if (n.st === 2) y += (t - n.t) * 900 * Math.max(0, t - n.t);   // errou: cai
+    const tam = a.s * (0.25 + 0.75 * Math.max(0, Math.min(1.25, k)));
+    const alfa = Math.min(1, (1.3 - z) * 3) * (z < 0 ? Math.max(0, 1 + z * 2.2) : 1);
+    caixinha(x, y, tam, n.lado, n.dir, alfa, n.st === 2);
+  }
+}
+function efeitoSabre(e, agora) {
+  const k = (agora - e.ini) / 650, a = alvoSabre(e.lado);
+  if (!e.errado && k < 0.6) {   // a caixinha partida em dois pedaços voando
+    const ang = SETA[e.dir] + Math.PI / 2, sep = k * a.s * 1.1;
+    g.save(); g.globalAlpha = 1 - k / 0.6;
+    for (const sg of [-1, 1]) {
+      g.save(); g.translate(a.x + Math.cos(ang) * sep * sg, a.y + Math.sin(ang) * sep * sg + k * k * 300);
+      g.rotate(sg * k * 2); g.fillStyle = COR_SABRE[e.lado];
+      g.beginPath(); g.roundRect(-a.s * 0.4, -a.s * 0.2, a.s * 0.8, a.s * 0.4, 8); g.fill(); g.restore();
+    }
+    // o risco do corte
+    const ang2 = SETA[e.dir], L = a.s * 0.9;
+    g.strokeStyle = '#fff'; g.lineWidth = 5 * (1 - k); g.lineCap = 'round'; g.shadowColor = COR_SABRE[e.lado]; g.shadowBlur = 18;
+    g.beginPath(); g.moveTo(a.x - Math.cos(ang2) * L, a.y - Math.sin(ang2) * L); g.lineTo(a.x + Math.cos(ang2) * L, a.y + Math.sin(ang2) * L); g.stroke();
+    g.restore();
+  }
+  if (!e.txt) return;
+  const y = a.y - a.s * 0.75 - k * 34, tam = e.txt === 'PERFEITO!' ? 19 : 17;
+  g.globalAlpha = Math.min(1, (1 - k) * 2); g.textAlign = 'center';
+  g.font = `900 ${tam}px ${FONTE}`; g.lineWidth = 5; g.strokeStyle = 'rgba(10,4,30,.75)'; g.strokeText(e.txt, a.x, y);
+  g.fillStyle = e.cor; g.fillText(e.txt, a.x, y); g.globalAlpha = 1;
 }
 
 // a bateria: 4 peças (bumbo, caixa, chimbal, prato) no lugar dos alvos
@@ -877,18 +991,34 @@ requestAnimationFrame(laco);
 
 // ---------- controles ----------
 const dedos = new Map();
+const golpes = new Map();   // dedos fazendo o movimento de corte (sabre)
 cv.addEventListener('pointerdown', e => {
   if (fase !== 'jogo') return;
   e.preventDefault();
+  if (modoSabre()) {
+    golpes.set(e.pointerId, { x: e.clientX, y: e.clientY, ts: e.timeStamp || performance.now(), feito: false });
+    try { cv.setPointerCapture(e.pointerId); } catch {}
+    return;
+  }
   const tr = trilhaDoX(e.clientX); dedos.set(e.pointerId, tr);
   try { cv.setPointerCapture(e.pointerId); } catch {}
   pressionar(tr, e.timeStamp || performance.now());
 });
-const largou = e => { const tr = dedos.get(e.pointerId); if (tr == null) return; dedos.delete(e.pointerId); if (![...dedos.values()].includes(tr)) soltar(tr); };
+const largou = e => { golpes.delete(e.pointerId); const tr = dedos.get(e.pointerId); if (tr == null) return; dedos.delete(e.pointerId); if (![...dedos.values()].includes(tr)) soltar(tr); };
 cv.addEventListener('pointerup', largou); cv.addEventListener('pointercancel', largou);
 // glissando: arrastou o dedo pra trilha do lado = tocou ela (como deslizar no teclado de um piano).
 // Passar por uma trilha sem nota não conta como erro, então dá pra "varrer" as sequências rápidas.
 cv.addEventListener('pointermove', e => {
+  const gp = golpes.get(e.pointerId);
+  if (gp && fase === 'jogo') {   // sabre: arrastou o dedo uns 25 px = cortou naquela direção
+    const dx = e.clientX - gp.x, dy = e.clientY - gp.y;
+    if (Math.hypot(dx, dy) < 25) return;
+    const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'dir' : 'esq') : (dy > 0 ? 'baixo' : 'cima');
+    const agoraTs = e.timeStamp || performance.now();
+    cortar(gp.x < cv.getBoundingClientRect().left + cv.clientWidth / 2 ? 0 : 1, dir, (gp.ts + agoraTs) / 2);
+    golpes.set(e.pointerId, { x: e.clientX, y: e.clientY, ts: agoraTs });   // dá pra emendar outro corte sem tirar o dedo
+    return;
+  }
   if (fase !== 'jogo' || !dedos.has(e.pointerId)) return;
   const antes = dedos.get(e.pointerId), agora = trilhaDoX(e.clientX);
   if (agora === antes) return;
@@ -904,6 +1034,11 @@ cv.addEventListener('pointermove', e => {
 addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (fase === 'jogo') {
+    if (TECLAS_SABRE[k] && modoSabre()) {
+      e.preventDefault(); if (e.repeat) return;
+      cortar(TECLAS_SABRE[k][0], TECLAS_SABRE[k][1], e.timeStamp || performance.now());
+      return;
+    }
     const tr = TECLAS[k];
     if (tr != null || k === ' ') e.preventDefault();   // setas e espaço não rolam a página
     if (e.repeat) return;

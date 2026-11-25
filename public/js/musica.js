@@ -13,6 +13,14 @@ export const MUSICAS = [
   { id: 'padaria', nome: 'Metal de Padaria', emoji: '🤘', estilo: 'metal', desc: 'Rápido, pesado e às 6 da manhã', bpm: 152, tom: 38, semente: 66,
     escala: [0, 2, 3, 5, 7, 8, 10], acordes: [[0, 'm'], [8, 'M'], [10, 'M'], [7, 'm']], cor: '#b46bff' },
 ];
+// músicas feitas no Suno pelo Lucas, com as faixas separadas (fundo + guitarra + bateria)
+const SUNO = [
+  { id: 'casquinha', pasta: 'faixas/blues/', nome: 'Blues da Casquinha', emoji: '🍦', cor: '#3aa0ff', desc: 'Blues sobre a casquinha que caiu no chão' },
+  { id: 'chikorita', pasta: 'faixas/chiko/', nome: 'Chikorita na Garra', emoji: '🌿', cor: '#2fdc6b', desc: 'Metal árabe + dubstep: a saga da máquina de garra' },
+  { id: 'dracula', pasta: 'faixas/dracula/', nome: 'Drácula, o Morceguinho', emoji: '🦇', cor: '#b46bff', desc: 'O morcego que invadiu a festa de Halloween' },
+  { id: 'arretado', pasta: 'faixas/forro/', nome: 'Forró Arretado', emoji: '🪗', cor: '#ffb800', desc: 'Sanfona endiabrada. No difícil, é difícil MESMO' },
+];
+MUSICAS.unshift(...SUNO.map(s => ({ ...s, estilo: 'audio', arquivo: { pasta: s.pasta } })));
 export const musicaPorId = id => MUSICAS.find(m => m.id === id) || MUSICAS[0];
 
 // ---------- músicas de arquivo (custom songs convertidas) ----------
@@ -35,6 +43,17 @@ export const carregada = m => !m.arquivo || !!(cache[m.id] && cache[m.id].buffer
 export function carregar(ac, m, aoAvancar) {
   if (!m.arquivo) return Promise.resolve();
   if (!cache[m.id]) cache[m.id] = (async () => {
+    if (m.arquivo.pasta) {   // faixas separadas: mapa + 3 áudios
+      const P = m.arquivo.pasta, nomes = ['fundo', 'guitarra', 'bateria'];
+      let prontos = 0;
+      const baixar = n => fetch(P + n + '.mp3').then(r => { if (!r.ok) throw new Error(n); return r.arrayBuffer(); })
+        .then(b => new Promise((ok, erro) => ac.decodeAudioData(b, ok, erro)))
+        .then(buf => { prontos++; if (aoAvancar) aoAvancar(prontos / nomes.length); return buf; });
+      const [mapa, ...bufs] = await Promise.all([fetch(P + 'mapa.json').then(r => { if (!r.ok) throw new Error('mapa'); return r.json(); }), ...nomes.map(baixar)]);
+      const buffers = {}; nomes.forEach((n, i) => { buffers[n] = bufs[i]; });
+      cache[m.id] = { mapa, buffer: buffers.fundo, buffers };
+      return cache[m.id];
+    }
     let mapa, bytes;
     if (m.arquivo.extra) ({ mapa, bytes } = await (await import('./extras.js')).obter(m, aoAvancar));   // trancada pela senha (Firebase)
     else [mapa, bytes] = await Promise.all([
@@ -134,8 +153,8 @@ export function compor(m) {
 }
 
 // ---------- troca de instrumento ----------
-export const INSTRUMENTOS = { guitarra: { nome: 'Guitarra', emoji: '🎸' }, bateria: { nome: 'Bateria', emoji: '🥁' }, teclado: { nome: 'Teclado', emoji: '🎹' } };
-export const INSTR_PADRAO = { troca: false, guitarra: true, bateria: true, teclado: true };
+export const INSTRUMENTOS = { guitarra: { nome: 'Guitarra', emoji: '🎸' }, bateria: { nome: 'Bateria', emoji: '🥁' }, teclado: { nome: 'Teclado', emoji: '🎹' }, sabre: { nome: 'Sabre', emoji: '⚔️' } };
+export const INSTR_PADRAO = { troca: false, guitarra: true, bateria: true, teclado: true, sabre: true };
 export function ligados(op) {
   if (!op || !op.troca) return ['guitarra'];
   const l = Object.keys(INSTRUMENTOS).filter(i => op[i] !== false);
@@ -145,7 +164,8 @@ export function ligados(op) {
 function instrumentoDaParte(nome, op) {
   const pref = { A: 'guitarra', B: 'bateria', A2: 'teclado', C: 'guitarra', F: 'guitarra' }[nome];
   if (!pref) return null;   // entrada: só a banda
-  const L = ligados(op);
+  const L = ligados(op).filter(i => i !== 'sabre');   // as músicas sintetizadas não têm caixinhas
+  if (!L.length) return 'guitarra';
   if (L.includes(pref)) return pref;
   const alternativa = { guitarra: ['teclado', 'bateria'], bateria: ['guitarra', 'teclado'], teclado: ['guitarra', 'bateria'] }[pref];
   return alternativa.find(i => L.includes(i)) || L[0];
@@ -192,6 +212,39 @@ function notasTeclado(m, comp, sec, dif, frase) {
   return out;
 }
 
+// músicas com faixas separadas: cada parte tem um instrumento (guitarra, bateria ou caixinhas do sabre)
+function partituraFaixas(mapa, dif, op) {
+  const L = ligados(op).filter(i => i !== 'teclado');
+  const troca = !!(op && op.troca);
+  const ALT = { guitarra: ['bateria', 'sabre'], bateria: ['guitarra', 'sabre'], sabre: ['guitarra', 'bateria'] };
+  const qual = i => L.includes(i) ? i : (ALT[i].find(x => L.includes(x)) || 'guitarra');
+  const partes = troca ? mapa.partes : [{ t: 0, instr: 'guitarra' }];
+  const trocas = [];
+  partes.forEach(p => { const i = qual(p.instr); if (!trocas.length || trocas[trocas.length - 1].instr !== i) trocas.push({ t: p.t, instr: i }); });
+  trocas[0].t = 0;
+  const N = mapa.notas[dif], bat = mapa.batidas, notas = [];
+  trocas.forEach((p, k) => {
+    const fimParte = k + 1 < trocas.length ? trocas[k + 1].t : Infinity;
+    for (const n of N[p.instr]) {
+      if (n.t < p.t || n.t >= fimParte) continue;
+      if (p.instr === 'sabre') notas.push({ t: n.t, lado: n.lado, dir: n.dir, trilha: -1, dur: 0, fim: n.t, instr: 'sabre' });
+      else {
+        const dur = n.dur > 0 ? Math.max(0, Math.min(n.dur, fimParte - n.t - 0.15)) : 0;
+        notas.push({ t: n.t, trilha: n.trilha, dur: dur > 0.25 ? dur : 0, fim: n.t + (dur > 0.25 ? dur : 0), midi: 0, peca: n.peca, instr: p.instr });
+      }
+    }
+  });
+  notas.sort((a, b) => a.t - b.t || a.trilha - b.trilha);
+  // frases de energia ⚡: blocos de 16 batidas; 1 em cada 4 vale energia
+  const fraseDe = t => Math.floor(Math.max(0, bisecaArr(bat, t) - 1) / 16);
+  notas.forEach((n, i) => { n.id = i; n.frase = fraseDe(n.t); n.estrela = n.frase % 4 === 2; });
+  const passos = bat.slice(1).map((b, i) => b - bat[i]).sort((a, b) => a - b);
+  const oitavo = (passos[passos.length >> 1] || 0.5) / 2;
+  const nomes = mapa.nomeGuitarra && mapa.nomeGuitarra !== 'Guitarra' ? { guitarra: { nome: mapa.nomeGuitarra, emoji: '🪗' } } : null;
+  return { oitavo, duracao: mapa.duracao, batidas: bat, notas, trocas, nomes };
+}
+function bisecaArr(a, x) { let lo = 0, hi = a.length; while (lo < hi) { const m = (lo + hi) >> 1; if (a[m] < x) lo = m + 1; else hi = m; } return lo; }
+
 // a "partitura" de cada dificuldade: quais notas ficam, em que trilha (0 a 3) e quanto duram
 export const DIFS = {
   facil: { nome: 'Fácil', emoji: '🙂', janela: 1.9 },
@@ -199,8 +252,10 @@ export const DIFS = {
   dificil: { nome: 'Difícil', emoji: '🔥', janela: 1.2 },
 };
 export function partitura(m, dif, op = null) {
-  if (m.arquivo) {   // custom song: por enquanto só guitarra
+  if (m.arquivo) {
     const { mapa } = cache[m.id];
+    if (mapa.v === 2) return partituraFaixas(mapa, dif, op);
+    // custom song antiga: só guitarra
     const notas = mapa.notas[dif].map((n, i) => ({ ...n, id: i, midi: 0, fim: n.t + n.dur, instr: 'guitarra' }));
     const bat = mapa.batidas;
     return { oitavo: (bat[1] - bat[0]) / 2, duracao: mapa.duracao, batidas: bat, notas, trocas: [{ t: 0, instr: 'guitarra' }] };
@@ -491,6 +546,48 @@ export class BandaAudio {
     s.buffer = bufRuido(ac); f.type = 'bandpass'; f.frequency.value = 420; f.Q.value = 4;
     g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
     s.connect(f).connect(g).connect(ac.destination); s.start(t); s.stop(t + 0.1);
+  }
+}
+
+// banda com as faixas separadas: fundo + guitarra + bateria tocando juntas.
+// Errou a nota? A faixa do seu instrumento quase some até você acertar de novo.
+export class BandaFaixas {
+  constructor(ac, m, comp, t0) {
+    this.ac = ac;
+    const c = cache[m.id];
+    this.saida = ac.createGain(); this.saida.gain.value = 1; this.saida.connect(ac.destination);
+    this.g = {}; this.fontes = [];
+    const agora = ac.currentTime;
+    for (const k of ['fundo', 'guitarra', 'bateria']) {
+      const gn = ac.createGain(); gn.gain.value = 1; gn.connect(this.saida);
+      const s = ac.createBufferSource(); s.buffer = c.buffers[k]; s.connect(gn);
+      if (t0 >= agora) s.start(t0); else s.start(agora, agora - t0);   // quem entrou atrasado começa do meio
+      this.g[k] = gn; this.fontes.push(s);
+    }
+  }
+  parar() {
+    const t = this.ac.currentTime;
+    try { this.saida.gain.setTargetAtTime(0, t, 0.1); this.fontes.forEach(s => s.stop(t + 0.6)); } catch {}
+  }
+  volta(k) { if (this.g[k]) this.g[k].gain.setTargetAtTime(1, this.ac.currentTime, 0.015); }
+  abafa(k) { if (this.g[k]) this.g[k].gain.setTargetAtTime(0.1, this.ac.currentTime, 0.04); }
+  solo() { this.volta('guitarra'); return () => {}; }
+  tambor() { this.volta('bateria'); return () => {}; }
+  piano() { return () => {}; }
+  corte(lado) {   // "vush" do sabre
+    const ac = this.ac, t = ac.currentTime, s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+    s.buffer = bufRuido(ac); f.type = 'bandpass'; f.Q.value = 2;
+    f.frequency.setValueAtTime(lado ? 2600 : 1800, t); f.frequency.exponentialRampToValueAtTime(lado ? 700 : 500, t + 0.16);
+    g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.35, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.18);
+    s.connect(f).connect(g).connect(ac.destination); s.start(t); s.stop(t + 0.2);
+  }
+  falhou(instr) { this.abafa(instr); }
+  errou(instr) {
+    const ac = this.ac, t = ac.currentTime, s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
+    s.buffer = bufRuido(ac); f.type = 'bandpass'; f.frequency.value = 420; f.Q.value = 4;
+    g.gain.setValueAtTime(0.3, t); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.09);
+    s.connect(f).connect(g).connect(ac.destination); s.start(t); s.stop(t + 0.1);
+    if (instr) this.abafa(instr);
   }
 }
 

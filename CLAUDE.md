@@ -47,3 +47,18 @@
   simplificado; Fácil = Medium ou simplificado), áudio em MP3 112k, capa 160px. O Lucas envia o pacote
   pela tela "🔒 Músicas extras → Enviar músicas".
 - `public/musicas/` fica fora do git (só pra testes/prévia local).
+
+## Músicas do Suno (faixas separadas)
+
+- Ficam em `public/faixas/<pasta>/`: `fundo.mp3` (música sem guitarra e sem bateria), `guitarra.mp3`, `bateria.mp3`
+  e `mapa.json` (v2: `batidas`, `partes` [{t, instr}], `notas[dif][guitarra|bateria|sabre]`). A lista fica em `SUNO` (musica.js).
+- São do Lucas (feitas no Suno Pro dele), por isso podem ficar no repositório público.
+- Como fazer uma nova: no Suno, separar as faixas (12 partes), baixar a música + a faixa do instrumento principal
+  (guitarra; no forró a sanfona veio em "brass") + bateria (cada arquivo gasta 1 download do mês: pergunte antes).
+  O computador do Claude não alcança os servidores do Suno: o navegador do app do Lucas baixa na pasta Downloads
+  e o Claude pega de lá. Depois `tools/gerar_mapas_suno.py <id>` (precisa de librosa) gera mapa + áudios; as
+  `partes` (que instrumento em cada trecho) são escolhidas à mão no SONGS do script.
+- No jogo: `BandaFaixas` toca as 3 faixas juntas; errar abaixa a faixa do seu instrumento até acertar de novo.
+- "Sabre" (caixinhas estilo Beat Saber) só existe nessas músicas: corte arrastando o polegar na direção da seta
+  (metade esquerda da tela = caixa vermelha, direita = azul). No PC: W A S D (esquerda) e setas (direita).
+  Só aparece com "Trocar de instrumento" ligado.
