@@ -3,7 +3,7 @@
 // Multiplayer: todo mundo da sala toca a MESMA música ao mesmo tempo (horário do servidor),
 // cada um na sua dificuldade, e os pontos vão aparecendo ao vivo pros outros.
 import * as rede from './rede.js';
-import { MUSICAS, musicaPorId, DIFS, partitura, Banda, BandaAudio, bipe, carregarLista, carregar, carregada } from './musica.js';
+import { MUSICAS, musicaPorId, DIFS, partitura, Banda, BandaAudio, bipe, carregarLista, carregar, carregada, INSTRUMENTOS, INSTR_PADRAO, ligados } from './musica.js';
 import * as extras from './extras.js';
 
 // a prévia (fora do site do jogo) não consegue falar com o servidor: só sozinho
@@ -30,6 +30,7 @@ let fase = 'inicio';
 const guardado = (k, padrao) => { try { const v = localStorage.getItem(k); return v == null ? padrao : JSON.parse(v); } catch { return padrao; } };
 const guardar = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 const escolha = guardado('ph-escolha', { musica: 'laje', dif: 'medio' });
+escolha.instr = { ...INSTR_PADRAO, ...(escolha.instr || {}) };
 if (!DIFS[escolha.dif]) escolha.dif = 'medio';
 let atrasoMs = guardado('ph-atraso', 0);
 
@@ -93,19 +94,34 @@ function desenharDifs(el, sel, aoEscolher) {
   el.innerHTML = Object.entries(DIFS).map(([id, d]) => `<button data-id="${id}" class="${id === sel ? 'on' : ''}">${d.emoji} ${d.nome}</button>`).join('');
   el.querySelectorAll('button').forEach(b => { b.onclick = () => aoEscolher(b.dataset.id); });
 }
+// "Trocar de instrumento" + quais instrumentos entram
+function desenharInstr(el, cfg, aoMudar) {
+  const pode = !!aoMudar;
+  el.innerHTML = `<label class="trocaInstr"><input type="checkbox" ${cfg.troca ? 'checked' : ''} ${pode ? '' : 'disabled'}><span>Trocar de instrumento durante a música</span></label>
+    <div class="chipsInstr">${Object.entries(INSTRUMENTOS).map(([k, v]) => `<button type="button" data-k="${k}" class="${cfg.troca && cfg[k] !== false ? 'on' : ''}" ${pode && cfg.troca ? '' : 'disabled'} aria-pressed="${cfg.troca && cfg[k] !== false}">${v.emoji} ${v.nome}</button>`).join('')}</div>`;
+  if (!pode) return;
+  el.querySelector('input').onchange = e => aoMudar({ ...cfg, troca: e.target.checked });
+  el.querySelectorAll('.chipsInstr button').forEach(b => b.onclick = () => {
+    const novo = { ...cfg, [b.dataset.k]: cfg[b.dataset.k] === false };
+    if (!Object.keys(INSTRUMENTOS).some(k => novo[k] !== false)) { toast('Deixe pelo menos um instrumento ligado 🙂'); return; }
+    aoMudar(novo);
+  });
+}
 function telaSolo() {
   const atualizar = () => {
     desenharMusicas($('listaMusicasSolo'), escolha.musica, id => { escolha.musica = id; guardar('ph-escolha', escolha); atualizar(); }, escolha.dif);
     desenharDifs($('difSolo'), escolha.dif, id => { escolha.dif = id; guardar('ph-escolha', escolha); atualizar(); });
+    desenharInstr($('instrSolo'), escolha.instr, cfg => { escolha.instr = cfg; guardar('ph-escolha', escolha); atualizar(); });
   };
   atualizar(); mostrar('telaMusicas');
 }
 
 // ======================= a partida =======================
-function novaPartida({ musica, dif, inicioPerf, online, ids = [], rodada = 0 }) {
+function novaPartida({ musica, dif, inicioPerf, online, ids = [], rodada = 0, instr = null }) {
   const ctx = audio();
   if (J && J.banda) J.banda.parar();
-  const m = musicaPorId(musica), p = partitura(m, dif);
+  const m = musicaPorId(musica), p = partitura(m, dif, instr);
+  if (m.arquivo && instr && instr.troca) setTimeout(() => toast('Essa música ainda só tem guitarra 🎸', 2600), 400);
   const t0 = ctx.currentTime + (inicioPerf - performance.now()) / 1000;
   const frases = {};
   p.notas.forEach(n => { if (n.estrela) { frases[n.frase] = frases[n.frase] || { total: 0, acertos: 0, falhou: false }; frases[n.frase].total++; } });
@@ -113,7 +129,7 @@ function novaPartida({ musica, dif, inicioPerf, online, ids = [], rodada = 0 }) 
     m, dif, p, notas: p.notas.map(n => ({ ...n, st: 0 })), perf0: inicioPerf, banda: new (m.arquivo ? BandaAudio : Banda)(ctx, m, p, t0),
     janela: DIFS[dif].janela, pontos: 0, combo: 0, maxCombo: 0, acertos: 0, perfeitos: 0, erros: 0, errosSeguidos: 0,
     energia: 0, dobro: null, frases, segurando: [null, null, null, null], apertado: [0, 0, 0, 0], efeitos: [], faiscas: [],
-    online, ids, rodada, fim: false, prox: 0, ultEnvio: 0, contou: -1,
+    online, ids, rodada, fim: false, prox: 0, ultEnvio: 0, contou: -1, avisoTroca: 0,
   };
   fase = 'jogo'; mostrar(null);
   prepararDancarino();
@@ -156,7 +172,9 @@ function acertar(n, d) {
   J.combo++; J.maxCombo = Math.max(J.maxCombo, J.combo); J.acertos++; J.errosSeguidos = 0;
   if (d <= PERFEITO) J.perfeitos++;
   J.pontos += q[1] * mult() * (dobrado() ? 2 : 1);
-  const som = J.banda.solo(n.midi, n.dur > 0 ? n.dur + 0.15 : 0.3);
+  const som = n.instr === 'bateria' ? J.banda.tambor(n.peca)
+    : n.instr === 'teclado' ? J.banda.piano(n.midi, n.dur > 0 ? n.dur + 0.15 : 0.6)
+    : J.banda.solo(n.midi, n.dur > 0 ? n.dur + 0.15 : 0.3);
   if (n.dur > 0) { n.st = 3; n.ate = n.t; J.segurando[n.trilha] = { n, som }; } else n.st = 1;
   // acorde: um texto só (senão os dois "PERFEITO!" se encavalam)
   const ultimoTxt = J.efeitos.filter(e => e.txt).pop();
@@ -239,6 +257,13 @@ function passo() {
   if (falta > 0 && falta < 4.2) {
     const c = Math.ceil(falta / (J.p.oitavo * 2));
     if (c !== J.contou && c <= 4) { J.contou = c; aviso(c === 4 ? 'PREPARA…' : String(c), 500); }
+  }
+  // aviso: vem aí outro instrumento
+  const TR = J.p.trocas || [];
+  for (let k = J.avisoTroca; k < TR.length; k++) {
+    if (TR[k].t - t > 1.7) break;
+    if (k > 0 || TR[k].instr !== 'guitarra') { const I = INSTRUMENTOS[TR[k].instr]; aviso(`${I.emoji} ${I.nome.toUpperCase()}!`, 1300); som1([660, 990]); }
+    J.avisoTroca = k + 1;
   }
   // placar pros outros
   if (J.online && performance.now() - J.ultEnvio > 450) {
@@ -455,12 +480,15 @@ function desenharDancarino(t, G) {
   g.fillStyle = DANC.roupa;
   g.beginPath(); g.moveTo(-larg / 2, topo); g.lineTo(larg / 2, topo); g.lineTo(larg * 0.4, -pern + S * 0.02); g.lineTo(-larg * 0.4, -pern + S * 0.02); g.closePath(); g.fill();
   g.fillStyle = 'rgba(0,0,0,.15)'; g.fillRect(-larg * 0.4, -pern - S * 0.04, larg * 0.8, S * 0.06);
-  // guitarra
+  // guitarra (na bateria some; no teclado vira um "keytar" branco)
+  const instrAgora = pesosInstr(t).atual;
   g.save(); g.translate(S * 0.02, -pern - tronco * 0.35); g.rotate(-0.45 + (nivel ? Math.sin(ph) * 0.06 : 0));
+  if (instrAgora === 'bateria') g.globalAlpha = 0;
   g.fillStyle = '#3a2a1a'; g.fillRect(-S * 0.75, -S * 0.035, S * 0.62, S * 0.07);              // braço
   g.fillStyle = '#1a1208'; g.fillRect(-S * 0.86, -S * 0.06, S * 0.13, S * 0.12);               // cabeça do braço
-  g.fillStyle = '#e8304a';
+  g.fillStyle = instrAgora === 'teclado' ? '#f4f1ff' : '#e8304a';
   g.beginPath(); g.ellipse(S * 0.02, 0, S * 0.2, S * 0.16, 0, 0, 7); g.fill();
+  if (instrAgora === 'teclado') { g.fillStyle = '#16122a'; for (let k = -3; k <= 3; k++) g.fillRect(k * S * 0.045 - S * 0.012, -S * 0.11, S * 0.024, S * 0.11); }
   g.beginPath(); g.ellipse(-S * 0.16, 0, S * 0.13, S * 0.11, 0, 0, 7); g.fill();
   g.fillStyle = '#fff'; g.beginPath(); g.ellipse(0, 0, S * 0.05, S * 0.12, 0, 0, 7); g.fill();
   g.strokeStyle = 'rgba(255,255,255,.6)'; g.lineWidth = 1; g.beginPath(); g.moveTo(-S * 0.82, 0); g.lineTo(S * 0.1, 0); g.stroke();
@@ -470,6 +498,14 @@ function desenharDancarino(t, G) {
   g.lineWidth = S * 0.11; g.strokeStyle = DANC.roupa;
   g.beginPath(); g.moveTo(-larg * 0.45, topo + S * 0.05); g.quadraticCurveTo(-larg * 0.75, -pern - tronco * 0.4, -S * 0.42, -pern - tronco * 0.12 - S * 0.16); g.stroke();
   g.beginPath(); g.moveTo(larg * 0.45, topo + S * 0.05); g.quadraticCurveTo(larg * 0.6, -pern - tronco * 0.2, S * 0.06, -pern - tronco * 0.45 + pal); g.stroke();
+  if (instrAgora === 'bateria') {   // baquetas batendo no ritmo
+    g.strokeStyle = '#e9d3a3'; g.lineWidth = S * 0.035;
+    const bate = Math.sin(ph * 2) * 0.5;
+    for (const [hx, hy, lado] of [[-S * 0.42, -pern - tronco * 0.12 - S * 0.16, -1], [S * 0.06, -pern - tronco * 0.45 + pal, 1]]) {
+      const ang = -Math.PI / 2 + lado * (0.5 + (lado > 0 ? bate : -bate) * 0.6);
+      g.beginPath(); g.moveTo(hx, hy); g.lineTo(hx + Math.cos(ang) * S * 0.45, hy + Math.sin(ang) * S * 0.45); g.stroke();
+    }
+  }
   g.fillStyle = DANC.pele;
   g.beginPath(); g.arc(-S * 0.42, -pern - tronco * 0.12 - S * 0.16, S * 0.065, 0, 7); g.fill();
   g.beginPath(); g.arc(S * 0.06, -pern - tronco * 0.45 + pal, S * 0.065, 0, 7); g.fill();
@@ -481,6 +517,15 @@ function desenharDancarino(t, G) {
   if (m >= 4 && Math.random() < 0.5) J.faiscas.push({ palco: true, x: cx + (Math.random() - 0.5) * S, y: pe - Math.random() * S * 0.3, a: Math.PI / 2 + (Math.random() - 0.5), v: 60 + Math.random() * 90, ini: performance.now(), cor: Math.random() < 0.5 ? '#ffb13d' : '#ff5f2e' });
 }
 
+// quanto de cada instrumento aparece na tela agora (0 a 1)
+function pesosInstr(t) {
+  const TR = (J && J.p.trocas) || [{ t: 0, instr: 'guitarra' }], ANT = 0.9, DUR = 0.5;
+  let i = 0; for (let k = 0; k < TR.length; k++) if (t >= TR[k].t - ANT) i = k;
+  const atual = TR[i].instr, ant = i > 0 ? TR[i - 1].instr : atual;
+  const f = i > 0 ? Math.max(0, Math.min(1, (t - (TR[i].t - ANT)) / DUR)) : 1;
+  const w = { guitarra: 0, bateria: 0, teclado: 0 }; w[ant] += 1 - f; w[atual] += f;
+  return { w, atual };
+}
 // ---------- a pista ----------
 function desenharJogo() {
   const t = tempo(), G = geo(), janela = J.janela, agora = performance.now();
@@ -489,7 +534,9 @@ function desenharJogo() {
   fundo(t, dob, intensidade);
   desenharDancarino(t, G);
   const zBaixo = -0.13;
-  // corpo da pista
+  const PI = pesosInstr(t), WI = PI.w;
+  // corpo da pista (fica quase transparente na bateria e no teclado)
+  g.globalAlpha = 0.28 + 0.72 * WI.guitarra;
   const pts = [ponto(G, -0.5, 1), ponto(G, 3.5, 1), ponto(G, 3.5, zBaixo), ponto(G, -0.5, zBaixo)];
   const gr = g.createLinearGradient(0, pts[0].y, 0, pts[2].y);
   gr.addColorStop(0, dob ? 'rgba(10,60,100,.55)' : 'rgba(12,6,30,.55)'); gr.addColorStop(0.35, dob ? 'rgba(12,70,120,.92)' : 'rgba(14,8,34,.92)'); gr.addColorStop(1, dob ? 'rgba(18,90,150,.97)' : 'rgba(20,10,46,.97)');
@@ -506,6 +553,7 @@ function desenharJogo() {
     const a = ponto(G, i - 0.5, 1), b = ponto(G, i - 0.5, zBaixo);
     g.strokeStyle = 'rgba(255,255,255,.09)'; g.lineWidth = 1.5; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.stroke();
   }
+  g.globalAlpha = 1;
   // linhas de tempo
   const bat = J.p.oitavo * 2, BT = J.p.batidas;
   const k0 = BT ? Math.max(0, bisseca(BT, t - 0.3)) : Math.ceil((t - 0.3) / bat);
@@ -529,8 +577,11 @@ function desenharJogo() {
   g.beginPath(); g.moveTo(l1.x, l1.y); g.lineTo(l2.x, l2.y); g.stroke(); g.restore();
   // alvos
   const rAlvo = G.larg / 4 * 0.37;
-  for (let tr = 0; tr < 4; tr++) {
+  if (WI.teclado > 0) { g.globalAlpha = WI.teclado; desenharTeclado(G, rAlvo, zBaixo); g.globalAlpha = 1; }
+  if (WI.bateria > 0) { g.globalAlpha = WI.bateria; desenharBateria(G, rAlvo); g.globalAlpha = 1; }
+  for (let tr = 0; tr < 4 && WI.guitarra > 0.02; tr++) {
     const p = ponto(G, tr, 0), ap = J.apertado[tr], seg = !!J.segurando[tr];
+    g.globalAlpha = WI.guitarra;
     g.save(); g.translate(p.x, p.y); g.scale(1, 0.58);
     g.fillStyle = 'rgba(0,0,0,.45)'; g.beginPath(); g.arc(0, rAlvo * 0.22, rAlvo * 1.06, 0, 7); g.fill();
     const anel = g.createLinearGradient(0, -rAlvo, 0, rAlvo);
@@ -548,6 +599,7 @@ function desenharJogo() {
       g.fillStyle = lg; g.beginPath(); g.moveTo(p.x - rAlvo * 0.8, p.y); g.lineTo(p.x + rAlvo * 0.8, p.y); g.lineTo(p.x + rAlvo * 0.3, p.y - alt); g.lineTo(p.x - rAlvo * 0.3, p.y - alt); g.closePath(); g.fill();
     }
   }
+  g.globalAlpha = 1;
   if (COMPUTADOR) {   // no computador, mostra qual tecla é cada trilha
     g.font = `900 15px ${FONTE}`; g.textAlign = 'center';
     for (let tr = 0; tr < 4; tr++) {
@@ -582,7 +634,7 @@ function desenharJogo() {
     const z = (n.t - t) / janela; if (z < zBaixo - 0.05) continue;
     const p = ponto(G, n.trilha, z), r = rAlvo * 0.88 * p.s;
     g.globalAlpha = Math.min(1, (1 - z) * 5);   // aparece suave lá no fundo
-    joia(p.x, p.y, r, n.trilha, n.st === 2 ? 'erro' : n.estrela ? 'estrela' : '', agora);
+    joia(p.x, p.y, r, n.trilha, n.st === 2 ? 'erro' : n.estrela ? 'estrela' : '', agora, n.instr);
     g.globalAlpha = 1;
   }
   // explosões de acerto (anel que cresce) e faíscas
@@ -633,8 +685,77 @@ function desenharJogo() {
   g.fillStyle = J.m.cor; g.fillRect(0, H - 4, W * prog, 4);
 }
 
-function joia(x, y, r, tr, tipo, agora = 0) {
+// a bateria: 4 peças (bumbo, caixa, chimbal, prato) no lugar dos alvos
+function desenharBateria(G, rAlvo) {
+  for (let tr = 0; tr < 4; tr++) {
+    const p = ponto(G, tr, 0), ap = J.apertado[tr], prato = tr === 3, chimbal = tr === 2;
+    const r = rAlvo * (tr === 0 ? 1.12 : 1);
+    g.save(); g.translate(p.x, p.y);
+    if (!prato && !chimbal) {   // casco do tambor
+      const cg = g.createLinearGradient(-r, 0, r, 0);
+      cg.addColorStop(0, ESCURAS[tr]); cg.addColorStop(0.45, CORES[tr]); cg.addColorStop(1, ESCURAS[tr]);
+      g.fillStyle = cg; g.fillRect(-r, 0, r * 2, r * 0.55);
+      g.beginPath(); g.ellipse(0, r * 0.55, r, r * 0.58 * 0.6, 0, 0, Math.PI); g.fill();
+    }
+    g.scale(1, prato || chimbal ? 0.42 : 0.58);
+    if (prato || chimbal) {   // pratos dourados
+      const pg = g.createRadialGradient(0, 0, r * 0.1, 0, 0, r * 1.1);
+      pg.addColorStop(0, ap ? '#fff6c8' : '#ffe58a'); pg.addColorStop(0.7, '#d9a520'); pg.addColorStop(1, '#8a6410');
+      g.fillStyle = pg; g.beginPath(); g.arc(0, 0, r * 1.05, 0, 7); g.fill();
+      g.strokeStyle = 'rgba(120,80,10,.45)'; g.lineWidth = 1.5;
+      for (const k of [0.35, 0.6, 0.85]) { g.beginPath(); g.arc(0, 0, r * k, 0, 7); g.stroke(); }
+      g.fillStyle = '#5a4108'; g.beginPath(); g.arc(0, 0, r * 0.12, 0, 7); g.fill();
+    } else {   // pele do tambor com aro de metal
+      g.fillStyle = '#c9ced8'; g.beginPath(); g.arc(0, 0, r * 1.04, 0, 7); g.fill();
+      g.fillStyle = ap ? CORES[tr] : '#f4eee2'; g.beginPath(); g.arc(0, 0, r * 0.9, 0, 7); g.fill();
+      g.strokeStyle = CORES[tr]; g.lineWidth = 4; g.beginPath(); g.arc(0, 0, r * 0.62, 0, 7); g.stroke();
+    }
+    g.restore();
+  }
+}
+// o teclado: 4 teclas brancas com teclas pretas entre elas
+function desenharTeclado(G, rAlvo, zBaixo) {
+  for (let tr = 0; tr < 4; tr++) {
+    const a = ponto(G, tr - 0.47, 0.05), b = ponto(G, tr + 0.47, 0.05), c = ponto(G, tr + 0.47, zBaixo), d = ponto(G, tr - 0.47, zBaixo);
+    const ap = J.apertado[tr] || J.segurando[tr];
+    const lg = g.createLinearGradient(0, a.y, 0, c.y);
+    lg.addColorStop(0, ap ? CORES[tr] : '#ffffff'); lg.addColorStop(1, ap ? ESCURAS[tr] : '#d9d4e8');
+    g.fillStyle = lg; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.lineTo(c.x, c.y); g.lineTo(d.x, d.y); g.closePath(); g.fill();
+    g.fillStyle = CORES[tr]; g.fillRect(a.x, a.y - 3, b.x - a.x, 6);   // risquinho colorido na beira da tecla
+  }
+  for (let i = 1; i < 4; i++) {   // teclas pretas
+    if (i === 2) continue;
+    const a = ponto(G, i - 0.5 - 0.14, 0.05), b = ponto(G, i - 0.5 + 0.14, 0.05), c = ponto(G, i - 0.5 + 0.14, -0.06), d = ponto(G, i - 0.5 - 0.14, -0.06);
+    g.fillStyle = '#16122a'; g.beginPath(); g.moveTo(a.x, a.y); g.lineTo(b.x, b.y); g.lineTo(c.x, c.y); g.lineTo(d.x, d.y); g.closePath(); g.fill();
+  }
+}
+function joia(x, y, r, tr, tipo, agora = 0, instr = 'guitarra') {
   if (r < 0.5) return;
+  if (instr === 'bateria' && tipo !== 'erro') {   // nota de bateria: um tamborzinho (ou prato)
+    g.save(); g.translate(x, y); g.scale(1, 0.5);
+    if (tr >= 2) {
+      const pg = g.createRadialGradient(0, 0, r * 0.1, 0, 0, r);
+      pg.addColorStop(0, '#fff6c8'); pg.addColorStop(1, '#c9921a');
+      g.fillStyle = pg; g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill();
+      g.strokeStyle = CORES[tr]; g.lineWidth = Math.max(2, r * 0.2); g.stroke();
+    } else {
+      g.fillStyle = ESCURAS[tr]; g.beginPath(); g.arc(0, r * 0.35, r, 0, 7); g.fill();
+      g.fillStyle = '#f4eee2'; g.beginPath(); g.arc(0, 0, r, 0, 7); g.fill();
+      g.strokeStyle = CORES[tr]; g.lineWidth = Math.max(2, r * 0.28); g.stroke();
+    }
+    if (tipo === 'estrela') { g.fillStyle = '#8fe6ff'; g.beginPath(); g.arc(0, 0, r * 0.3, 0, 7); g.fill(); }
+    g.restore(); return;
+  }
+  if (instr === 'teclado' && tipo !== 'erro') {   // nota de teclado: uma barrinha
+    g.save(); g.translate(x, y);
+    const w = r * 1.9, h = r * 0.75;
+    g.fillStyle = 'rgba(0,0,0,.35)'; g.beginPath(); g.roundRect(-w / 2, -h / 2 + 3, w, h, h * 0.4); g.fill();
+    const lg = g.createLinearGradient(0, -h / 2, 0, h / 2);
+    lg.addColorStop(0, tipo === 'estrela' ? '#e8fbff' : '#ffffff'); lg.addColorStop(1, CORES[tr]);
+    g.fillStyle = lg; g.beginPath(); g.roundRect(-w / 2, -h / 2, w, h, h * 0.4); g.fill();
+    g.strokeStyle = ESCURAS[tr]; g.lineWidth = Math.max(1.5, r * 0.12); g.stroke();
+    g.restore(); return;
+  }
   g.save(); g.translate(x, y); g.scale(1, 0.6);
   const erro = tipo === 'erro', estrela = tipo === 'estrela';
   const cor = erro ? '#6b6b78' : CORES[tr], esc2 = erro ? '#3a3a44' : ESCURAS[tr];
@@ -869,7 +990,7 @@ async function prepararMusica(id) {
 async function comecarSolo() {
   M.code = null;
   if (!(await prepararMusica(escolha.musica))) return;
-  novaPartida({ musica: escolha.musica, dif: escolha.dif, inicioPerf: performance.now() + 1500, online: false });
+  novaPartida({ musica: escolha.musica, dif: escolha.dif, inicioPerf: performance.now() + 1500, online: false, instr: escolha.instr });
 }
 
 // ======================= salas =======================
@@ -930,7 +1051,7 @@ function atualizouSala() {
   if (meta.status === 'playing' && meta.rodada !== M.rodadaVista) {
     M.rodadaVista = meta.rodada;
     if ((meta.ids || []).includes(rede.meuId())) {
-      prepararMusica(meta.musica).then(ok => { if (ok && M.code) novaPartida({ musica: meta.musica, dif: escolha.dif, inicioPerf: performance.now() + (meta.inicio - rede.agora()), online: true, ids: meta.ids, rodada: meta.rodada }); });
+      prepararMusica(meta.musica).then(ok => { if (ok && M.code) novaPartida({ musica: meta.musica, dif: escolha.dif, inicioPerf: performance.now() + (meta.inicio - rede.agora()), online: true, ids: meta.ids, rodada: meta.rodada, instr: meta.instr || null }); });
       return;
     }
   }
@@ -949,6 +1070,9 @@ function desenharSala() {
   $('quemEscolhe').textContent = M.host ? '(você escolhe)' : '(quem criou escolhe)';
   desenharMusicas($('listaMusicasSala'), musica, M.host ? id => rede.atualizarMeta(M.code, { musica: id }).catch(() => {}) : null, escolha.dif);
   if (!conheco) $('listaMusicasSala').insertAdjacentHTML('afterbegin', '<button class="musica on" disabled><span class="em">🔒</span><span><b>Música extra</b><small>Toque em "Músicas extras" e digite a senha</small></span></button>');
+  const cfgSala = { ...INSTR_PADRAO, ...((M.meta && M.meta.instr) || (M.host ? escolha.instr : {})) };
+  $('instrQuem').textContent = M.host ? '(você escolhe, vale pra todos)' : '(quem criou escolhe)';
+  desenharInstr($('instrSala'), cfgSala, M.host ? cfg => { escolha.instr = cfg; guardar('ph-escolha', escolha); rede.atualizarMeta(M.code, { instr: cfg }).catch(() => {}); } : null);
   desenharDifs($('difSala'), escolha.dif, id => { escolha.dif = id; guardar('ph-escolha', escolha); rede.atualizarEu(M.code, { dif: id }).catch(() => {}); desenharSala(); });
   $('btnComecar').hidden = !M.host;
   $('salaEspera').hidden = M.host;
@@ -958,7 +1082,7 @@ async function comecarOnline() {
   const ids = Object.entries(M.players).filter(([, p]) => p.online).map(([id]) => id);
   if (ids.length < 1) return;
   await rede.limparPartida(M.code).catch(() => {});
-  await rede.atualizarMeta(M.code, { status: 'playing', rodada: (M.meta.rodada || 0) + 1, musica: M.meta.musica || 'laje', inicio: rede.agora() + 4000, ids });
+  await rede.atualizarMeta(M.code, { status: 'playing', rodada: (M.meta.rodada || 0) + 1, musica: M.meta.musica || 'laje', instr: M.meta.instr || escolha.instr, inicio: rede.agora() + 4000, ids });
 }
 
 // XP vai pro mesmo nível do boneco (o perfil é um só pra todos os jogos)

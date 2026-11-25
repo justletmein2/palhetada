@@ -176,3 +176,15 @@ h1.titulo-ritmo span:nth-child(4n+3) { --c: #ffd23f; } h1.titulo-ritmo span:nth-
 .grande.outra { background: #3aa0ff; }
 [data-tema="escuro"] .grande.outra { background: #2d7fd0; }
 @media (prefers-reduced-motion: reduce) { #tcharan, #telaFim .caixa { animation: none; } }
+
+/* opção de troca de instrumento */
+.instr { display: flex; flex-direction: column; gap: 8px; }
+.trocaInstr { display: flex; align-items: center; gap: 10px; text-align: left; font-weight: 800; font-size: 14px; cursor: pointer; }
+.trocaInstr input { width: 22px; height: 22px; accent-color: var(--rosa); flex: none; }
+.chipsInstr { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.chipsInstr button { background: #efeaff; color: var(--roxo); font-weight: 800; padding: 9px 4px; border-radius: 12px; border: 3px solid transparent; font-size: 13px; min-height: 44px; }
+.chipsInstr button.on { border-color: var(--rosa); background: #fff0f6; color: var(--rosa); }
+.chipsInstr button:disabled { opacity: .45; }
+.chipsInstr button.on:disabled { opacity: .8; }
+[data-tema="escuro"] .chipsInstr button { background: #3a2c78; color: #f1edff; }
+[data-tema="escuro"] .chipsInstr button.on { background: #4a1f4f; color: #fff; }

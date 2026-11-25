@@ -20,6 +20,16 @@
 - `database.rules.json` tem as regras do projeto INTEIRO (Forma Palavras + Pé na Tábua + Torre Bamba
   + Cripta + Palhetada). Ao mudar, peça pro Lucas colar no Console do Firebase.
 
+## Troca de instrumento (opção do anfitrião)
+
+- `meta.instr` = `{ troca, guitarra, bateria, teclado }` (no modo sozinho, `escolha.instr`). Com `troca`
+  ligado, cada parte da música tem um instrumento (A guitarra, B bateria, A2 teclado, C guitarra);
+  instrumento desligado é trocado por outro ligado. Tudo determinístico: todo mundo recebe as mesmas trocas.
+- `musica.js`: `partitura(m, dif, instr)` gera notas com `instr` (bateria: trilhas = bumbo, caixa, chimbal, prato;
+  teclado: as 4 notas do acorde). A banda não toca a parte do jogador e toca a melodia sozinha quando ele
+  não está na guitarra. `trocas` = onde o instrumento muda (a tela troca 0,9 s antes).
+- Custom songs (arquivo) por enquanto só guitarra; as do Suno com faixas separadas são o próximo passo.
+
 ## Testar
 
 - Sirva uma pasta com `palhetada/` (= public) e `forma-palavras/` lado a lado e abra

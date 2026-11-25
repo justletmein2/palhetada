@@ -112,7 +112,7 @@ export function compor(m) {
   for (const sec of ROTEIRO) {
     const nome = sec.replace('*', ''), estrela = sec.endsWith('*');
     const tam = COMPASSOS[nome] || 4;
-    secoes.push({ nome, compasso, tam });
+    secoes.push({ nome, compasso, tam, estrela });
     if (frases[nome]) {
       const lista = frases[nome];
       lista.forEach((n, i) => {
@@ -133,20 +133,81 @@ export function compor(m) {
   };
 }
 
+// ---------- troca de instrumento ----------
+export const INSTRUMENTOS = { guitarra: { nome: 'Guitarra', emoji: '🎸' }, bateria: { nome: 'Bateria', emoji: '🥁' }, teclado: { nome: 'Teclado', emoji: '🎹' } };
+export const INSTR_PADRAO = { troca: false, guitarra: true, bateria: true, teclado: true };
+export function ligados(op) {
+  if (!op || !op.troca) return ['guitarra'];
+  const l = Object.keys(INSTRUMENTOS).filter(i => op[i] !== false);
+  return l.length ? l : ['guitarra'];
+}
+// cada parte da música tem um instrumento "natural"; se ele estiver desligado, entra outro
+function instrumentoDaParte(nome, op) {
+  const pref = { A: 'guitarra', B: 'bateria', A2: 'teclado', C: 'guitarra', F: 'guitarra' }[nome];
+  if (!pref) return null;   // entrada: só a banda
+  const L = ligados(op);
+  if (L.includes(pref)) return pref;
+  const alternativa = { guitarra: ['teclado', 'bateria'], bateria: ['guitarra', 'teclado'], teclado: ['guitarra', 'bateria'] }[pref];
+  return alternativa.find(i => L.includes(i)) || L[0];
+}
+// padrões de bateria de cada estilo (8 colcheias por compasso): bumbo, caixa, chimbal
+export const BATERIA = {
+  rock: { k: '10001100', sn: '00100010', h: '11111111' },
+  forro: { k: '10010010', sn: '00000010', h: '11111111' },
+  neon: { k: '10101010', sn: '00100010', h: '01010101' },
+  metal: { k: '11111111', sn: '00100010', h: '10101010' },
+};
+export const PECAS = ['bumbo', 'caixa', 'chimbal', 'prato'];   // trilha 0..3 na bateria
+function notasBateria(m, comp, sec, dif, frase) {
+  const pad = BATERIA[m.estilo], o = comp.oitavo, out = [];
+  for (let c = sec.compasso; c < sec.compasso + sec.tam; c++) {
+    for (let x = 0; x < 8; x++) {
+      const t = (c * 8 + x) * o, aqui = [];
+      const prato = x === 0 && (c - sec.compasso) % 4 === 0;
+      if (prato) aqui.push(3);
+      if (pad.sn[x] === '1') aqui.push(1);
+      if (pad.k[x] === '1' && (dif === 'dificil' || (dif === 'medio' ? x % 2 === 0 : x % 4 === 0))) aqui.push(0);
+      if (pad.h[x] === '1' && !prato && (dif === 'dificil' || (dif === 'medio' && x % 2 === 0))) aqui.push(2);
+      let fica = [...new Set(aqui)];
+      if (dif === 'facil') fica = fica.slice(0, 1);       // fácil: uma peça por vez
+      else fica = fica.slice(0, 2);                      // nunca mais que dois dedos
+      for (const tr of fica) out.push({ t, trilha: tr, dur: 0, midi: 0, instr: 'bateria', peca: PECAS[tr], frase, estrela: !!sec.estrela, acorde: fica.length > 1 });
+    }
+  }
+  return out;
+}
+function notasTeclado(m, comp, sec, dif, frase) {
+  const o = comp.oitavo, out = [];
+  const padroes = { dificil: [[0, 0], [1, 1], [2, 2], [3, 3], [4, 2], [5, 1], [6, 2], [7, 3]], medio: [[0, 0], [2, 2], [4, 1], [6, 3]], facil: [[0, 0], [4, 2]] }[dif];
+  for (let c = sec.compasso; c < sec.compasso + sec.tam; c++) {
+    const [raizAc, tipo] = m.acordes[(c - sec.compasso) % m.acordes.length];
+    const r = m.tom + 24 + raizAc, tons = [r, r + (tipo === 'm' ? 3 : 4), r + 7, r + 12];   // as 4 teclas = notas do acorde
+    const ultimo = c === sec.compasso + sec.tam - 1;
+    for (const [x, tr] of padroes) {
+      if (ultimo && x > 4) continue;
+      const dur = dif === 'facil' ? o * 2.6 : (ultimo && x === 4) ? o * 3 : 0;
+      out.push({ t: (c * 8 + x) * o, trilha: tr, dur, midi: tons[tr], instr: 'teclado', frase, estrela: !!sec.estrela });
+    }
+  }
+  return out;
+}
+
 // a "partitura" de cada dificuldade: quais notas ficam, em que trilha (0 a 3) e quanto duram
 export const DIFS = {
   facil: { nome: 'Fácil', emoji: '🙂', janela: 1.9 },
   medio: { nome: 'Médio', emoji: '😎', janela: 1.5 },
   dificil: { nome: 'Difícil', emoji: '🔥', janela: 1.2 },
 };
-export function partitura(m, dif) {
-  if (m.arquivo) {
+export function partitura(m, dif, op = null) {
+  if (m.arquivo) {   // custom song: por enquanto só guitarra
     const { mapa } = cache[m.id];
-    const notas = mapa.notas[dif].map((n, i) => ({ ...n, id: i, midi: 0, fim: n.t + n.dur }));
+    const notas = mapa.notas[dif].map((n, i) => ({ ...n, id: i, midi: 0, fim: n.t + n.dur, instr: 'guitarra' }));
     const bat = mapa.batidas;
-    return { oitavo: (bat[1] - bat[0]) / 2, duracao: mapa.duracao, batidas: bat, notas };
+    return { oitavo: (bat[1] - bat[0]) / 2, duracao: mapa.duracao, batidas: bat, notas, trocas: [{ t: 0, instr: 'guitarra' }] };
   }
   const comp = compor(m);
+  comp.secoes.forEach(sec => { sec.instr = instrumentoDaParte(sec.nome, op); sec.t0 = sec.compasso * 8 * comp.oitavo; });
+  const secDaCasa = casa => { const c = Math.floor(casa / 8); return comp.secoes.find(x => c >= x.compasso && c < x.compasso + x.tam) || comp.secoes[comp.secoes.length - 1]; };
   let lista = comp.notas.filter(n => {
     const s = n.casa % 8;
     if (dif === 'facil') return s === 0 || s === 4 || n.final;
@@ -176,7 +237,8 @@ export function partitura(m, dif) {
     // nota longa quando sobra espaço depois dela
     const minimo = { facil: 6, medio: 5, dificil: 4 }[dif];
     const longa = n.vaga >= minimo ? (n.vaga - (dif === 'facil' ? 2 : 1.5)) * comp.oitavo : 0;
-    const base = { t: n.t, midi: n.midi, dur: longa, frase: n.frase, estrela: n.estrela };
+    const base = { t: n.t, midi: n.midi, dur: longa, frase: n.frase, estrela: n.estrela, instr: 'guitarra' };
+    if (secDaCasa(n.casa).instr !== 'guitarra') return;   // essa parte é de outro instrumento
     notas.push({ ...base, trilha });
     // difícil: acordes (dois dedos) nos tempos fortes de compasso par
     const compasso = Math.floor(n.casa / 8);
@@ -185,9 +247,20 @@ export function partitura(m, dif) {
       notas.push({ ...base, trilha: outra, midi: n.midi + 7, acorde: true });
     }
   });
+  // partes de bateria e de teclado
+  comp.secoes.forEach((sec, i) => {
+    if (sec.instr === 'bateria') notas.push(...notasBateria(m, comp, sec, dif, 1000 + i));
+    if (sec.instr === 'teclado') notas.push(...notasTeclado(m, comp, sec, dif, 1000 + i));
+  });
   notas.sort((a, b) => a.t - b.t || a.trilha - b.trilha);
   notas.forEach((n, i) => { n.id = i; n.fim = n.t + n.dur; });
-  return { ...comp, notas };
+  // quando a guitarra não é do jogador, a banda toca a melodia sozinha
+  const melodiaAuto = {};
+  comp.notas.forEach(n => { if (secDaCasa(n.casa).instr && secDaCasa(n.casa).instr !== 'guitarra') melodiaAuto[n.casa] = { midi: n.midi, dur: Math.max(1, Math.min(n.vaga, 4)) * comp.oitavo * 0.9 }; });
+  // pontos onde o instrumento muda (a entrada usa o instrumento da primeira parte)
+  const trocas = [];
+  comp.secoes.forEach(sec => { const ins = sec.instr || (comp.secoes.find(x => x.instr) || {}).instr || 'guitarra'; if (!trocas.length || trocas[trocas.length - 1].instr !== ins) trocas.push({ t: sec.t0, instr: ins }); });
+  return { ...comp, notas, melodiaAuto, trocas };
 }
 
 // ======================= som =======================
@@ -250,23 +323,23 @@ export class Banda {
       if (casa === sec.compasso * 8) { this.prato(t, 2.4); this.bumbo(t); this.acorde(raiz, ac0[1], t, this.comp.oitavo * 14); this.baixo(raiz, t, this.comp.oitavo * 14); }
       return;
     }
-    if (s === 0 && sec.compasso === compasso && sec.nome !== 'I') this.prato(t, 1.2);
-    const E = m.estilo;
-    // bateria
-    const pad = {
-      rock: { k: '10001100', sn: '00100010', h: '11111111' },
-      forro: { k: '10010010', sn: '00000010', h: '11111111' },
-      neon: { k: '10101010', sn: '00100010', h: '01010101' },
-      metal: { k: '11111111', sn: '00100010', h: '10101010' },
-    }[E];
+    if (s === 0 && sec.compasso === compasso && sec.nome !== 'I' && sec.instr !== 'bateria') this.prato(t, 1.2);
+    const E = m.estilo, ins = sec.instr;
+    const auto = comp.melodiaAuto && comp.melodiaAuto[casa];
+    if (auto) this.leadAuto(auto.midi, t, auto.dur);
+    // bateria (quando a bateria é do jogador, a banda não toca)
+    const pad = BATERIA[E];
+    if (ins === 'bateria') { /* jogador toca */ } else {
     if (pad.k[s] === '1') this.bumbo(t, E === 'metal' ? 0.7 : 1);
     if (pad.sn[s] === '1') this.caixa(t, E === 'forro' ? 0.6 : 1);
     if (pad.h[s] === '1') this.chimbal(t, E === 'forro' ? (s % 2 ? 0.5 : 1) : (s % 2 ? 0.6 : 0.9), E === 'forro');
+    }
     // baixo
     const bx = { rock: '11111111', forro: '10010010', neon: '01110111', metal: '11111111' }[E];
     if (bx[s] === '1') this.baixo(raiz + (E === 'forro' && s === 3 ? 7 : 0), t, this.comp.oitavo * (E === 'forro' ? 1.6 : 0.85));
-    // acordes
-    if (E === 'rock' || E === 'metal') { if (s === 0 || s === 4) this.acorde(raiz, '5', t, this.comp.oitavo * 3.6); }
+    // acordes (quando o teclado é do jogador, a banda segura só um fundo bem baixinho)
+    if (ins === 'teclado') { if (s === 0) this.acorde(raiz, ac0[1], t, this.comp.oitavo * 7.6, 0.35); }
+    else if (E === 'rock' || E === 'metal') { if (s === 0 || s === 4) this.acorde(raiz, '5', t, this.comp.oitavo * 3.6); }
     else if (E === 'forro') { if (s === 2 || s === 3 || s === 6) this.acorde(raiz, ac0[1], t, this.comp.oitavo * 0.7); }
     else if (s === 0) this.acorde(raiz, ac0[1], t, this.comp.oitavo * 7.6);
   }
@@ -305,7 +378,7 @@ export class Banda {
     f.type = 'lowpass'; f.frequency.value = this.m.estilo === 'neon' ? 700 : 900;
     this.env(g, t, this.m.estilo === 'neon' ? 0.22 : 0.42, 0.006, dur); o.connect(f).connect(g).connect(this.saida); o.start(t); o.stop(t + dur + 0.05);
   }
-  acorde(raiz, tipo, t, dur) {
+  acorde(raiz, tipo, t, dur, vol = 1) {
     const { ac } = this, E = this.m.estilo;
     const iv = tipo === '5' ? [0, 7, 12] : tipo === 'm' ? [0, 3, 7] : [0, 4, 7];
     const g = ac.createGain(), f = ac.createBiquadFilter();
@@ -313,9 +386,9 @@ export class Banda {
     let fim = g;
     if (E === 'rock' || E === 'metal') {
       const d = ac.createWaveShaper(); d.curve = distorcao(); g.connect(d); fim = d;
-      this.env(g, t, 0.16, 0.005, dur);
-    } else if (E === 'neon') this.env(g, t, 0.07, 0.25, dur);
-    else this.env(g, t, 0.06, 0.01, dur);
+      this.env(g, t, 0.16 * vol, 0.005, dur);
+    } else if (E === 'neon') this.env(g, t, 0.07 * vol, 0.25, dur);
+    else this.env(g, t, 0.06 * vol, 0.01, dur);
     const pos = ac.createGain(); pos.gain.value = E === 'rock' || E === 'metal' ? 0.11 : 1;
     fim.connect(f).connect(pos).connect(this.saida);
     iv.forEach((x, i) => {
@@ -359,6 +432,38 @@ export class Banda {
     else setTimeout(soltar, (dur + 0.2) * 1000); // segurança
     return soltar;
   }
+  // a melodia tocada pela banda (quando o jogador está na bateria ou no teclado)
+  leadAuto(midi, t, dur) {
+    const { ac } = this, g = ac.createGain(), f = ac.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.value = 2200;
+    const o = ac.createOscillator(); o.type = this.m.estilo === 'forro' ? 'square' : 'sawtooth'; o.frequency.value = hz(midi);
+    this.env(g, t, 0.045, 0.01, Math.max(0.15, dur));
+    o.connect(f).connect(g).connect(this.saida); o.start(t); o.stop(t + dur + 0.1);
+  }
+  // o jogador acertou uma peça da bateria
+  tambor(peca) {
+    const t = this.ac.currentTime;
+    if (peca === 'bumbo') this.bumbo(t, 1.3);
+    else if (peca === 'caixa') this.caixa(t, 1.3);
+    else if (peca === 'chimbal') this.chimbal(t, 1.4);
+    else this.prato(t, 1.4);
+    return () => {};
+  }
+  // o jogador acertou uma tecla
+  piano(midi, dur = 0.6) {
+    const { ac } = this, t = ac.currentTime, g = ac.createGain(), f = ac.createBiquadFilter();
+    f.type = 'lowpass'; f.frequency.setValueAtTime(4200, t); f.frequency.exponentialRampToValueAtTime(1200, t + 0.6);
+    const oscs = [['triangle', 0, 1], ['sine', 12, 0.35], ['sine', 19, 0.12]].map(([tp, st, v]) => {
+      const o = ac.createOscillator(), gg = ac.createGain(); o.type = tp; o.frequency.value = hz(midi + st); gg.gain.value = v;
+      o.connect(gg).connect(f); o.start(t); return o;
+    });
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.22, t + 0.006); g.gain.exponentialRampToValueAtTime(0.07, t + 0.35);
+    f.connect(g).connect(this.lead);
+    let solto = false;
+    const soltar = () => { if (solto) return; solto = true; const a = ac.currentTime; g.gain.cancelScheduledValues(a); g.gain.setValueAtTime(Math.max(0.0001, g.gain.value), a); g.gain.exponentialRampToValueAtTime(0.0001, a + 0.25); oscs.forEach(o => o.stop(a + 0.3)); };
+    setTimeout(soltar, Math.max(0.5, dur) * 1000);
+    return soltar;
+  }
   errou() { // corda abafada
     const t = this.ac.currentTime;
     this.ruido(t, 0.09, 'bandpass', 420, 0.35, 4);
@@ -379,6 +484,8 @@ export class BandaAudio {
     try { this.saida.gain.setTargetAtTime(0, this.ac.currentTime, 0.1); this.fonte.stop(this.ac.currentTime + 0.6); } catch {}
   }
   solo() { return () => {}; } // a guitarra já está na gravação
+  tambor() { return () => {}; }
+  piano() { return () => {}; }
   errou() {
     const ac = this.ac, t = ac.currentTime, s = ac.createBufferSource(), f = ac.createBiquadFilter(), g = ac.createGain();
     s.buffer = bufRuido(ac); f.type = 'bandpass'; f.frequency.value = 420; f.Q.value = 4;
